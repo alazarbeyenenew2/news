@@ -101,6 +101,8 @@ def _commands(user: User) -> list[BotCommand]:
                 BotCommand("pause", L.CMD_PAUSE), BotCommand("resume", L.CMD_RESUME),
                 BotCommand("sources", L.CMD_SOURCES), BotCommand("language", L.CMD_LANGUAGE),
                 BotCommand("cve", L.CMD_CVE), BotCommand("help", L.CMD_HELP)]
+    if config.SUPPORT_USERNAME:
+        commands.append(BotCommand("support", L.CMD_SUPPORT))
     if user.is_admin:
         commands.append(BotCommand("admin", L.CMD_ADMIN))
     if user.is_super_admin:
@@ -1157,7 +1159,29 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = await _active_user(update, context)
     if user:
-        await _send(context, update.effective_chat.id, tr(user).HELP, main_keyboard(user))
+        L = tr(user)
+        if config.SUPPORT_USERNAME:
+            await _send(context, update.effective_chat.id, f"{L.HELP}\n\n{L.support(config.SUPPORT_USERNAME)}",
+                        support_keyboard(user))
+        else:
+            await _send(context, update.effective_chat.id, L.HELP, main_keyboard(user))
+
+
+def support_keyboard(user: User) -> InlineKeyboardMarkup:
+    """A button that opens a chat with the support account."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton(
+        tr(user).BTN_SUPPORT, url=f"https://t.me/{config.SUPPORT_USERNAME}")]])
+
+
+async def support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/support: who to message, with a tap-to-open button."""
+    user = await _active_user(update, context)
+    if not user:
+        return
+    if not config.SUPPORT_USERNAME:
+        await help_command(update, context)
+        return
+    await _send(context, update.effective_chat.id, tr(user).support(config.SUPPORT_USERNAME), support_keyboard(user))
 
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1437,7 +1461,7 @@ def build_application(request=None) -> Application:
     for command, handler in [("start", start), ("latest", pull_news), ("interests", interests), ("topics", interests),
                              ("settings", settings), ("digest", digest), ("pause", pause), ("resume", resume),
                              ("sources", sources), ("language", choose_language), ("help", help_command),
-                             ("admin", admin), ("backup", backup_menu), ("cve", cve)]:
+                             ("admin", admin), ("backup", backup_menu), ("cve", cve), ("support", support)]:
         app.add_handler(CommandHandler(command, handler, filters=private))
 
     # Reply keyboard buttons, in every language.

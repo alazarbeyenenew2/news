@@ -16,6 +16,8 @@ def _bool(name: str, default: str) -> bool:
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+# Telegram username users can message for help (shown in /help and /support). Empty hides it.
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "alazarbeyene").lstrip("@").strip()
 BOT_NAME = os.getenv("BOT_NAME", "NewsPulse")
 
 # Telegram user IDs that are always admins ("super admins"). Set only here, never from the bot or web page.

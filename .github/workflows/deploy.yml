@@ -26,6 +26,7 @@
 #   DEFAULT_MAX_PER_DAY (30), MESSAGES_PER_SECOND (20),
 #   DOMAIN       when set, also starts Caddy (`--profile https`) and serves the admin page at https://DOMAIN
 #   ADMIN_PORT (8000)    the port the admin page listens on, on all of the server's interfaces (0.0.0.0)
+#   SUPPORT_USERNAME (alazarbeyene)  Telegram username users are sent to from /help and /support
 #
 # Every runtime setting comes from here: the workflow writes the server's .env on each deploy and
 # overwrites any hand edits there. Setup steps: see "Deploy with GitHub Actions" in README.md.
@@ -178,6 +179,7 @@ jobs:
           DEFAULT_MAX_PER_DAY: ${{ vars.DEFAULT_MAX_PER_DAY }}
           MESSAGES_PER_SECOND: ${{ vars.MESSAGES_PER_SECOND }}
           ADMIN_PORT: ${{ vars.ADMIN_PORT || '8000' }}
+          SUPPORT_USERNAME: ${{ vars.SUPPORT_USERNAME }}
         run: |
           umask 077
           mkdir -p deploy-env
@@ -195,7 +197,7 @@ jobs:
           for name in BOT_TOKEN BOT_NAME SUPER_ADMIN_IDS ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY \
                       POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB NVD_API_KEY TIMEZONE \
                       CLASSIFY_MIN_CONFIDENCE MAX_ARTICLE_AGE_HOURS ARTICLE_RETENTION_DAYS DEFAULT_MAX_PER_DAY \
-                      MESSAGES_PER_SECOND ADMIN_PORT DOMAIN; do
+                      MESSAGES_PER_SECOND ADMIN_PORT DOMAIN SUPPORT_USERNAME; do
             value=${!name}
             [ -z "$value" ] && continue
             if [[ "$value" == *"'"* || "$value" == *$'\n'* ]]; then

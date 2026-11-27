@@ -30,6 +30,7 @@ CMD_PAUSE = "Pause alerts"
 CMD_RESUME = "Resume alerts"
 CMD_SETTINGS = "Settings"
 CMD_HELP = "How it works"
+CMD_SUPPORT = "Contact support"
 CMD_ADMIN = "Admin: status, sources, topics"
 CMD_BACKUP = "Super admin: backup"
 
@@ -254,6 +255,14 @@ HELP = (f"❓ <b>How {BOT} works</b>\n{LINE}\n"
         "/language — change the bot language\n\n"
         "<i>The same story from several providers is sent once. Topics don't say anything about "
         "your views and are only used to choose your alerts.</i>")
+
+BTN_SUPPORT = "💬 Contact support"
+
+
+def support(username: str) -> str:
+    return (f"💬 <b>Support</b>\nQuestions, problems or ideas? Message "
+            f"<a href=\"https://t.me/{username}\">@{username}</a> on Telegram.")
+
 
 LANGUAGE_SET = "✅ Language changed to <b>English</b>."
 DISABLED = "⛔ Your account has been turned off by an admin."

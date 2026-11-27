@@ -29,6 +29,7 @@ CMD_PAUSE = "ማሳወቂያ አቁም"
 CMD_RESUME = "ማሳወቂያ ቀጥል"
 CMD_SETTINGS = "ቅንብሮች"
 CMD_HELP = "እንዴት እንደሚሠራ"
+CMD_SUPPORT = "ድጋፍ ያግኙ"
 CMD_ADMIN = "አስተዳደር፦ ሁኔታ፣ ምንጮች፣ ርዕሶች"
 CMD_BACKUP = "ዋና አስተዳዳሪ፦ ምትኬ"
 
@@ -252,6 +253,14 @@ HELP = (f"❓ <b>{BOT} እንዴት ይሠራል</b>\n{LINE}\n"
         "/language — የቦቱን ቋንቋ ቀይር\n\n"
         "<i>አንድ ዜና ከብዙ ምንጮች ቢመጣም አንድ ጊዜ ብቻ ይላካል። ርዕሶችዎ ስለ አመለካከትዎ ምንም አይናገሩም፤ "
         "ማሳወቂያዎን ለመምረጥ ብቻ ያገለግላሉ።</i>")
+
+BTN_SUPPORT = "💬 ድጋፍ ያግኙ"
+
+
+def support(username: str) -> str:
+    return (f"💬 <b>ድጋፍ</b>\nጥያቄ፣ ችግር ወይም ሐሳብ አለዎት? በቴሌግራም "
+            f"<a href=\"https://t.me/{username}\">@{username}</a> ላይ ይጻፉልን።")
+
 
 LANGUAGE_SET = "✅ ቋንቋ ወደ <b>አማርኛ</b> ተቀይሯል።"
 DISABLED = "⛔ መለያዎ በአስተዳዳሪ ተዘግቷል።"

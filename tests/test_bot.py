@@ -222,6 +222,14 @@ def test_sources_and_help(chat):
     assert "/interests" in chat.send("/help").last("sendMessage")["text"]
 
 
+def test_support_contact_is_clickable(chat):
+    onboard(chat)
+    for message in (chat.send("/help").last("sendMessage"), chat.send("/support").last("sendMessage")):
+        assert '<a href="https://t.me/alazarbeyene">@alazarbeyene</a>' in message["text"]
+        button = message["reply_markup"]["inline_keyboard"][0][0]
+        assert button["url"] == "https://t.me/alazarbeyene" and "support" in button["text"].lower()
+
+
 def test_admin_tools_are_admin_only(chat):
     onboard(chat)
     assert texts_en.ONLY_ADMINS in chat.send("/admin").last("sendMessage")["text"]
