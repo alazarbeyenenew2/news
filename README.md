@@ -120,7 +120,8 @@ Same as the report bot: all production configuration lives in GitHub (**Settings
 | --- | --- |
 | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` | the server and the deploy key |
 | `BOT_TOKEN` | token from @BotFather (a different bot from the report bot) |
-| `ADMIN_PASSWORD` | web admin page password |
+| `ADMIN_USERNAME` | web admin page username, e.g. `admin` |
+| `ADMIN_PASSWORD` | web admin page password (12+ characters): `python3 -c "import secrets; print(secrets.token_urlsafe(16))"` |
 | `SECRET_KEY` | `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `POSTGRES_USER` | database user name, e.g. `newsbot` (lowercase letters, digits, `_`) |
 | `POSTGRES_PASSWORD` | database password: `python3 -c "import secrets; print(secrets.token_urlsafe(24))"` (no `'` or line breaks) |
@@ -129,7 +130,6 @@ Same as the report bot: all production configuration lives in GitHub (**Settings
 | --- | --- | --- |
 | `SUPER_ADMIN_IDS` | (required) | your Telegram user ID(s), comma separated |
 | `BOT_NAME` | `NewsPulse` | name used in the bot's messages |
-| `ADMIN_USERNAME` | `admin` | web admin page username |
 | `POSTGRES_DB` | `newsbot` | database name |
 | `TIMEZONE` | `Africa/Addis_Ababa` | times shown to users, digest hours, "today" |
 | `CLASSIFY_MIN_CONFIDENCE` | `0.6` | how sure the classifier must be |

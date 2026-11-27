@@ -10,6 +10,7 @@
 #   DEPLOY_SSH_KEY       private key whose public key is in that user's ~/.ssh/authorized_keys (required)
 #   DEPLOY_KNOWN_HOSTS   output of `ssh-keyscan -H <host>`; pins the server's host key   (recommended)
 #   BOT_TOKEN            token from @BotFather                                           (required)
+#   ADMIN_USERNAME       web admin page username                                         (required)
 #   ADMIN_PASSWORD       web admin page password                                         (required)
 #   SECRET_KEY           random string that signs login cookies:
 #                        python3 -c "import secrets; print(secrets.token_hex(32))"       (required)
@@ -19,7 +20,7 @@
 # Repository variables (same page -> Variables):
 #   SUPER_ADMIN_IDS      your Telegram user ID(s), comma separated                       (required)
 #   POSTGRES_DB (newsbot), DEPLOY_PORT (22), DEPLOY_PATH (news-bot, relative to the user's home),
-#   BOT_NAME (NewsPulse), ADMIN_USERNAME (admin), TIMEZONE (Africa/Addis_Ababa),
+#   BOT_NAME (NewsPulse), TIMEZONE (Africa/Addis_Ababa),
 #   CLASSIFY_MIN_CONFIDENCE (0.6), MAX_ARTICLE_AGE_HOURS (12), ARTICLE_RETENTION_DAYS (30),
 #   DEFAULT_MAX_PER_DAY (30), MESSAGES_PER_SECOND (20),
 #   DOMAIN       when set, also starts Caddy (`--profile https`) and serves the admin page at https://DOMAIN
@@ -100,6 +101,7 @@ jobs:
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
@@ -107,7 +109,7 @@ jobs:
           SUPER_ADMIN_IDS: ${{ vars.SUPER_ADMIN_IDS }}
         run: |
           missing=0
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY BOT_TOKEN ADMIN_PASSWORD SECRET_KEY \
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY BOT_TOKEN ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY \
                       POSTGRES_USER POSTGRES_PASSWORD SUPER_ADMIN_IDS; do
             if [ -z "${!name}" ]; then echo "::error::$name is not set."; missing=1; fi
           done
@@ -120,6 +122,9 @@ jobs:
           fi
           if ! [[ "$POSTGRES_USER" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; then
             echo "::error::POSTGRES_USER must be lowercase letters, digits and _ (e.g. newsbot)."; exit 1
+          fi
+          if [ "${#ADMIN_PASSWORD}" -lt 12 ]; then
+            echo "::warning::ADMIN_PASSWORD is shorter than 12 characters; the admin page is reachable from the internet."
           fi
           if [ "${#POSTGRES_PASSWORD}" -lt 16 ]; then
             echo "::warning::POSTGRES_PASSWORD is shorter than 16 characters; use a long random string."
@@ -158,7 +163,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           BOT_NAME: ${{ vars.BOT_NAME || 'NewsPulse' }}
           SUPER_ADMIN_IDS: ${{ vars.SUPER_ADMIN_IDS }}
-          ADMIN_USERNAME: ${{ vars.ADMIN_USERNAME || 'admin' }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
