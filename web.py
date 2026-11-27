@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -15,6 +15,7 @@ import config
 import metrics
 from db import db, now_utc, parse_iso, to_local
 from netsafe import UnsafeURL, check_url_syntax
+from profiles import ProfileCache
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["local"] = lambda iso: to_local(iso).strftime("%Y-%m-%d %H:%M") if iso else "—"
@@ -47,6 +48,7 @@ def create_web_app(lifespan=None) -> FastAPI:
                   openapi_url=None)
     app.add_middleware(SessionMiddleware, secret_key=config.SECRET_KEY, same_site="strict",
                        max_age=60 * 60 * 12, https_only=False)
+    app.state.profiles = ProfileCache()
 
     def logged_in(request: Request) -> bool:
         return request.session.get("admin") is True
@@ -286,8 +288,26 @@ def create_web_app(lifespan=None) -> FastAPI:
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
         rows = db.list_users(q)
-        prefs = db.user_preferences([r["user"].telegram_id for r in rows])
-        return page(request, "users.html", rows=rows, q=q, prefs=prefs)
+        ids = [r["user"].telegram_id for r in rows]
+        prefs = db.user_preferences(ids)
+        telegram = worker(request, "telegram")
+        profiles = await request.app.state.profiles.get_many(telegram.bot, ids) if telegram else {}
+        return page(request, "users.html", rows=rows, q=q, prefs=prefs, profiles=profiles)
+
+    @app.get("/users/{telegram_id}/photo")
+    async def user_photo(request: Request, telegram_id: int):
+        """The user's Telegram profile photo (small), fetched by the bot and cached."""
+        if not logged_in(request):
+            raise HTTPException(401)
+        telegram = worker(request, "telegram")
+        if telegram is None or db.get_user(telegram_id) is None:
+            raise HTTPException(404)
+        photo = await request.app.state.profiles.photo(telegram.bot, telegram_id)
+        if photo is None:
+            raise HTTPException(404)
+        data, _ = photo
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400",
+                                                                "X-Content-Type-Options": "nosniff"})
 
     @app.post("/users/{telegram_id}/{action}")
     async def user_action(request: Request, telegram_id: int, action: str, csrf: str = Form(...),

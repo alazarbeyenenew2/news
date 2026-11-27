@@ -110,3 +110,52 @@ def test_users_page_lists_preferences(client):
     assert "📰 digest 20:00" in html and "news in" not in html
     assert "1 sources off" in html and "ESPN" in html
     assert "Critical only" in html and "nginx" in html
+
+
+class FakeFile:
+    file_size = 4
+
+    async def download_as_bytearray(self):
+        return bytearray(b"\xff\xd8jp")
+
+
+class FakeBot:
+    """getChat/getFile like Telegram: user 100 has a photo and a bio, others fail."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def get_chat(self, chat_id):
+        from types import SimpleNamespace
+        from telegram.error import BadRequest
+        self.calls.append(("getChat", chat_id))
+        if chat_id != 100:
+            raise BadRequest("Chat not found")
+        return SimpleNamespace(bio="Coffee & <b>news</b>", first_name="Abebe", last_name="Kebede", username="abebe_k",
+                               photo=SimpleNamespace(small_file_id="f1", small_file_unique_id="u1"))
+
+    async def get_file(self, file_id):
+        self.calls.append(("getFile", file_id))
+        return FakeFile()
+
+
+def test_users_page_shows_telegram_profiles(client):
+    from types import SimpleNamespace
+    bot = FakeBot()
+    client.app.state.telegram = SimpleNamespace(bot=bot, running=True)
+    assert client.get("/users/100/photo").status_code == 401  # admins only
+    login(client)
+    db.upsert_user(100, 100, "abebe", "Abebe")
+    db.upsert_user(200, 200, None, "Sara")
+    html = client.get("/users").text
+    assert "Abebe Kebede" in html and "@abebe_k" in html and 'href="https://t.me/abebe_k"' in html
+    assert "Coffee &amp; &lt;b&gt;news&lt;/b&gt;" in html  # bio is escaped
+    assert 'src="/users/100/photo?v=u1"' in html
+    assert 'href="tg://user?id=200"' in html and "Telegram profile unavailable" in html
+    r = client.get("/users/100/photo")
+    assert r.status_code == 200 and r.content == b"\xff\xd8jp" and r.headers["content-type"] == "image/jpeg"
+    client.get("/users/100/photo")
+    client.get("/users")
+    assert bot.calls.count(("getFile", "f1")) == 1 and bot.calls.count(("getChat", 100)) == 1  # cached
+    assert client.get("/users/200/photo").status_code == 404
+    assert client.get("/users/999/photo").status_code == 404
