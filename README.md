@@ -83,8 +83,13 @@ Only official RSS/Atom feeds that publishers offer for syndication are used. The
 | WHO | news | Health | on |
 | NASA | news releases | Science | on |
 | The Reporter Ethiopia | site feed | Ethiopia | on |
+| Fana Broadcasting | English and Amharic site feeds | Ethiopia | on |
+| Ethiopia Observer, Ethiopia Insight | site feeds | Ethiopia | on |
+| Capital Ethiopia, Addis Fortune | site feeds (business weeklies) | Ethiopia, Business 0.5 | on |
+| allAfrica | Ethiopia headlines (aggregates many Ethiopian publishers) | Ethiopia | on; check allAfrica's terms for commercial use |
+| ሪፖርተር (The Reporter, Amharic) | site feed | Ethiopia | off: feed hadn't updated since 1 Nov |
 | Krebs on Security, Ars Technica, ESPN | | Cybersecurity / Technology / Sports | off (choose to enable) |
-| Addis Standard | site feed | Ethiopia | **off: returns 403 to automated clients**; left off, not worked around |
+| Addis Standard, Walta, Addis Zeybe | site feeds | Ethiopia | **off: Cloudflare blocks automated clients**; left off, not worked around |
 
 **Before running this as a public or commercial service**, read each publisher's terms for their feeds and keep a note in the provider's **Notes** field. Some feeds are offered for personal, non-commercial use or ask for specific attribution. If the terms are unclear, turn the provider off.
 
