@@ -44,9 +44,10 @@ async def lifespan(app: FastAPI):
     tasks = [asyncio.create_task(nightly_backup_loop(tg_app), name="backup")]
     sender = Sender(tg_app.bot)
     app.state.sender = tg_app.bot_data["sender"] = sender
+    digester = tg_app.bot_data["digester"] = Digester(tg_app.bot)
     if config.DELIVERY_ENABLED:
         tasks += [asyncio.create_task(sender.run_forever(), name="sender"),
-                  asyncio.create_task(Digester(tg_app.bot).run_forever(), name="digest"),
+                  asyncio.create_task(digester.run_forever(), name="digest"),
                   asyncio.create_task(OnboardingAutosave(tg_app.bot).run_forever(), name="autosave")]
     collector = Collector(on_queued=sender.wake)
     app.state.collector = tg_app.bot_data["collector"] = collector

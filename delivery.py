@@ -244,6 +244,7 @@ class Digester:
 
     def __init__(self, bot):
         self.bot = bot
+        self._locks: dict[int, asyncio.Lock] = {}
 
     async def run_forever(self) -> None:
         while True:
@@ -259,37 +260,50 @@ class Digester:
         sent = 0
         today = local_now.date().isoformat()
         for user in db.digest_users_due(local_now.hour, today):
-            items = db.digest_items(user.telegram_id)
             db.update_user(user.telegram_id, last_digest_date=today)
-            if not items:
-                continue
-            L = texts.get(user.language)
-            shown = items[:config.DIGEST_MAX_ARTICLES]
-            providers = {p.id: p.name for p in db.providers()}
-            lines = [L.digest_title(local_now.strftime("%d/%m/%Y"), len(items))]
-            for i, (_, a) in enumerate(shown, 1):
-                lines.append(f"{i}. <a href=\"{html.escape(a.canonical_url, quote=True)}\">"
-                             f"{html.escape(_truncate(a.title, 140))}</a> — {html.escape(providers.get(a.provider_id, ''))}")
-            if len(items) > len(shown):
-                lines.append(L.digest_more(len(items) - len(shown)))
-            text = "\n".join(lines)
-            if len(text) > TEXT_LIMIT:
-                text = text[:TEXT_LIMIT - 1].rsplit("\n", 1)[0]
-            try:
-                await self.bot.send_message(user.chat_id, text, parse_mode=ParseMode.HTML,
-                                            disable_web_page_preview=True)
-            except Forbidden:
-                db.update_user(user.telegram_id, status="blocked")
-                db.skip_queued_for_user(user.telegram_id, "user blocked the bot")
-                continue
-            except TelegramError as e:
-                log.warning("Digest to %s failed: %s", user.telegram_id, e)
-                db.update_user(user.telegram_id, last_digest_date=None)  # try again next minute
-                continue
-            for n, _ in shown:
-                db.mark_notification(n.id, "sent")
-            for n, _ in items[len(shown):]:
-                db.mark_notification(n.id, "skipped", "over the digest limit", count_attempt=False)
-            metrics.inc("digests_sent")
-            sent += 1
+            result = await self.send(user, local_now)
+            if result is None:  # Telegram error: try again next minute
+                db.update_user(user.telegram_id, last_digest_date=None)
+            elif result:
+                sent += 1
         return sent
+
+    async def send(self, user, local_now: datetime) -> int | None:
+        """Send the user's held stories as one digest message now. Returns how many stories were in it
+        (0: nothing waiting), or None if Telegram failed."""
+        lock = self._locks.setdefault(user.telegram_id, asyncio.Lock())
+        async with lock:  # the scheduled digest and "send now" never send the same stories twice
+            return await self._send(user, local_now)
+
+    async def _send(self, user, local_now: datetime) -> int | None:
+        items = db.digest_items(user.telegram_id)
+        if not items:
+            return 0
+        L = texts.get(user.language)
+        shown = items[:config.DIGEST_MAX_ARTICLES]
+        providers = {p.id: p.name for p in db.providers()}
+        lines = [L.digest_title(local_now.strftime("%d/%m/%Y"), len(items))]
+        for i, (_, a) in enumerate(shown, 1):
+            lines.append(f"{i}. <a href=\"{html.escape(a.canonical_url, quote=True)}\">"
+                         f"{html.escape(_truncate(a.title, 140))}</a> — {html.escape(providers.get(a.provider_id, ''))}")
+        if len(items) > len(shown):
+            lines.append(L.digest_more(len(items) - len(shown)))
+        text = "\n".join(lines)
+        if len(text) > TEXT_LIMIT:
+            text = text[:TEXT_LIMIT - 1].rsplit("\n", 1)[0]
+        try:
+            await self.bot.send_message(user.chat_id, text, parse_mode=ParseMode.HTML,
+                                        disable_web_page_preview=True)
+        except Forbidden:
+            db.update_user(user.telegram_id, status="blocked")
+            db.skip_queued_for_user(user.telegram_id, "user blocked the bot")
+            return 0
+        except TelegramError as e:
+            log.warning("Digest to %s failed: %s", user.telegram_id, e)
+            return None
+        for n, _ in shown:
+            db.mark_notification(n.id, "sent")
+        for n, _ in items[len(shown):]:
+            db.mark_notification(n.id, "skipped", "over the digest limit", count_attempt=False)
+        metrics.inc("digests_sent")
+        return len(shown)

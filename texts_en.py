@@ -83,6 +83,11 @@ DELIVERY_PROMPT = (f"📬 <b>How should news reach you?</b>\n{LINE}\n"
                    "<i>You can change this later in ⚙️ Settings.</i>")
 DELIVERY_INSTANT = "⚡ Instant alerts"
 DELIVERY_DIGEST = "📰 Daily digest"
+DIGEST_NOW = "⚡ Get my digest now"
+DIGEST_NOW_LOADING = "⏳ Checking for the latest news…"
+DIGEST_NOW_EMPTY = ("📭 Nothing is waiting in your digest right now. New stories for your topics will be "
+                    "collected for your next digest — or tap 📥 Latest news to see today's stories.")
+DIGEST_NOW_FAILED = "⚠️ I couldn't send your digest just now. Please try again in a minute."
 
 
 def onboarding_done(topics: str, instant: bool, hour: int) -> str:

@@ -555,3 +555,31 @@ def test_onboarding_choices_auto_save_after_ten_minutes(chat):
     assert not db.get_user(200).onboarding_completed
     chat.api.clear()
     assert chat.loop.run_until_complete(autosave.run_once()) == 0 and _alerts(chat.api) == []  # once
+
+
+def test_digest_now_sends_held_stories_immediately(chat):
+    from collector import Collector
+    from db import now_utc
+    from news import RawArticle
+    onboard(chat)
+    chat.tap("dg:h:20")  # digest at 20:00
+    user = db.get_user(USER)
+    assert user.delivery_mode == "digest"
+    buttons = [b for row in chat.send("/digest").last("sendMessage")["reply_markup"]["inline_keyboard"] for b in row]
+    assert any(b["callback_data"] == "dg:now" and b["text"] == texts_en.DIGEST_NOW for b in buttons)
+    bbc = next(p for p in db.providers() if p.key == "bbc_sport")
+    db.execute("UPDATE providers SET last_success_at = %s WHERE id = %s", (now_utc(), bbc.id))  # not a backlog fetch
+    Collector().process(db.get_provider(bbc.id), [RawArticle(
+        external_id="d1", title="Arsenal win the cup final in extra time", description="",
+        url="https://e.com/d1", published_at=now_utc(), language="en")], now_utc())
+    held = [r for r in db.execute("SELECT status FROM notifications WHERE user_id = %s", (USER,))]
+    assert [r["status"] for r in held] == ["digest"]
+    chat.api.clear()
+    chat.tap("dg:now")
+    texts_sent = chat.api.sent_texts()
+    assert any("Your daily digest" in t and "https://e.com/d1" in t for t in texts_sent)
+    assert [r["status"] for r in db.execute("SELECT status FROM notifications WHERE user_id = %s", (USER,))] == ["sent"]
+    assert db.get_user(USER).last_digest_date is None  # the 20:00 digest still comes with newer stories
+    chat.api.clear()
+    chat.tap("dg:now")  # nothing left
+    assert texts_en.DIGEST_NOW_EMPTY in chat.api.sent_texts()

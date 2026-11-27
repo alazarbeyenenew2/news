@@ -41,7 +41,7 @@ import texts
 import metrics
 from db import (CVE_MIN_SEVERITIES, User, day_start_utc, db, load_technologies, local_today, now_utc, parse_iso,
                 to_local)
-from delivery import CVE_MENU, MUTE_FROM_ALERT, send_alert
+from delivery import CVE_MENU, MUTE_FROM_ALERT, Digester, send_alert
 from keyboards import grid
 
 log = logging.getLogger(__name__)
@@ -705,6 +705,8 @@ def _digest_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
                     (_mark(not instant, L.DELIVERY_DIGEST), f"{DIGEST}digest")])
     rows += _grid([(_mark(not instant and h == user.digest_hour, f"{h:02d}:00"), f"{DIGEST}h:{h}")
                     for h in DIGEST_HOURS])
+    if not instant:
+        rows.append([InlineKeyboardButton(L.DIGEST_NOW, callback_data=f"{DIGEST}now")])
     return L.digest_menu(instant, user.digest_hour), InlineKeyboardMarkup(rows)
 
 
@@ -722,6 +724,9 @@ async def digest_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not user:
         return
     value = query.data[len(DIGEST):]
+    if value == "now":
+        await digest_now(update, context, user)
+        return
     if value in ("instant", "digest"):
         user = _set_mode(user, value)
     elif value.startswith("h:") and value[2:].isdigit() and int(value[2:]) in DIGEST_HOURS:
@@ -729,6 +734,26 @@ async def digest_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         user = _set_mode(user, "digest")
     await query.answer()
     await _show(update, context, *_digest_screen(user))
+
+
+async def digest_now(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
+    """⚡ Get my digest now: check the user's sources for new stories, then send everything held for
+    their digest straight away instead of waiting for the digest hour. The scheduled digest still comes
+    at its hour with whatever arrives after this."""
+    query = update.callback_query
+    L = tr(user)
+    digester = context.application.bot_data.get("digester")
+    if digester is None:
+        digester = context.application.bot_data["digester"] = Digester(context.bot)
+    await query.answer(L.DIGEST_NOW_LOADING)
+    await _refresh_sources(context, user, update.effective_chat.id)
+    count = await digester.send(db.get_user(user.telegram_id), datetime.now(config.TIMEZONE))
+    if count is None:
+        await _send(context, update.effective_chat.id, L.DIGEST_NOW_FAILED)
+    elif count == 0:
+        await _send(context, update.effective_chat.id, L.DIGEST_NOW_EMPTY, main_keyboard(user))
+    else:
+        log.info("Digest on demand for %s: %s stories", user.telegram_id, count)
 
 
 # ---------- muting from an alert ----------
@@ -1487,7 +1512,7 @@ def build_application(request=None) -> Application:
     app.add_handler(CallbackQueryHandler(source_tap, pattern=rf"^({SOURCE}[os]:\d+|{SOURCE_ALL}[os]|{SOURCE_NONE}[os])$"))
     app.add_handler(CallbackQueryHandler(source_save, pattern=rf"^({SOURCE_SAVE}|{SOURCE_SKIP})[os]$"))
     app.add_handler(CallbackQueryHandler(settings_action, pattern=rf"^{SETTINGS}[a-z]+(:[a-z0-9]+)?$"))
-    app.add_handler(CallbackQueryHandler(digest_action, pattern=rf"^{DIGEST}(instant|digest|h:\d+)$"))
+    app.add_handler(CallbackQueryHandler(digest_action, pattern=rf"^{DIGEST}(instant|digest|now|h:\d+)$"))
     app.add_handler(CallbackQueryHandler(mute_from_alert, pattern=rf"^{MUTE_FROM_ALERT}\d+$"))
     app.add_handler(CallbackQueryHandler(admin_action, pattern=rf"^{ADMIN}[a-z]+(:\d+){{0,2}}$"))
     app.add_handler(CallbackQueryHandler(backup_action, pattern=rf"^{BACKUP}(now|on|off)$"))
