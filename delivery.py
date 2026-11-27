@@ -64,7 +64,7 @@ def format_alert(article: Article, provider_name: str, category: Category | None
 
 
 def format_cve_alert(article: Article, cve: Cve, matched: str | None, language: str | None,
-                     limit: int) -> tuple[str, InlineKeyboardMarkup]:
+                     limit: int, match_source: str | None = None) -> tuple[str, InlineKeyboardMarkup]:
     """A CVE report: severity, "actively exploited" when CISA says so, the CVE id and description, which
     of the user's technologies it matched, and a link to the NVD entry."""
     L = texts.get(language)
@@ -77,6 +77,8 @@ def format_cve_alert(article: Article, cve: Cve, matched: str | None, language: 
         head += f" · {L.RANSOMWARE_LABEL}"
     when_label, when_value = (L.PUBLISHED, article.published_at) if article.published_at else (L.FOUND, article.fetched_at)
     match_text = L.CVE_ALL_TECH if matched == "*" else html.escape(matched or "")
+    if matched and matched != "*" and match_source in L.CVE_MATCH_SOURCES:
+        match_text += f" <i>({L.CVE_MATCH_SOURCES[match_source]})</i>"
     footer = ((f"\n\n🧩 {L.CVE_MATCHES}: {match_text}" if matched else "")
               + f"\n🕒 {when_label}: {L.format_time(to_local(when_value))}")
     description = cve.description
@@ -169,7 +171,7 @@ class Sender:
         category = db.get_category(category_id) if category_id else None
         try:
             message_id = await send_alert(self.bot, user, article, provider.name if provider else "", category,
-                                          cve=cve, matched=n.matched)
+                                          cve=cve, matched=n.matched, match_source=n.match_source)
         except RetryAfter as e:
             wait = _retry_after_seconds(e)
             self._paused_until = now_utc() + timedelta(seconds=wait)
@@ -209,12 +211,12 @@ class Sender:
 
 
 async def send_alert(bot, user: User, article: Article, provider_name: str, category: Category | None,
-                     cve: Cve | None = None, matched: str | None = None) -> int:
+                     cve: Cve | None = None, matched: str | None = None, match_source: str | None = None) -> int:
     """Send one alert: a photo with a caption when the feed gave an image Telegram can use, otherwise text;
     a CVE report when `cve` is given. Returns the Telegram message id. Used by the Sender and by the
     📥 Latest news button."""
     if cve:
-        text, markup = format_cve_alert(article, cve, matched, user.language, TEXT_LIMIT)
+        text, markup = format_cve_alert(article, cve, matched, user.language, TEXT_LIMIT, match_source)
         message = await bot.send_message(user.chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup,
                                          disable_web_page_preview=True)
         return message.message_id

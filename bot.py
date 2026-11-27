@@ -185,6 +185,8 @@ def _topic_names(user: User, only_enabled: bool = False) -> str:
     interests = db.interests(user.telegram_id)
     names = [c.label(user.language) for c in db.categories()
              if c.id in interests and (interests[c.id] or not only_enabled)]
+    if user.cve_alerts:
+        names.append(tr(user).BTN_CVE)
     return ", ".join(names) if names else tr(user).NONE
 
 
@@ -241,9 +243,11 @@ def _topic_picker(user: User, mode: str, first_name: str | None = None) -> tuple
     categories = db.categories()
     chosen = set(db.interests(user.telegram_id))
     text = (L.welcome(html.escape(first_name or "")) + L.TOPICS_PROMPT) if mode == "o" else L.TOPICS_EDIT_PROMPT
-    text += L.topics_selected(len(chosen & {c.id for c in categories}))
-    rows = _grid([(("✅ " if c.id in chosen else "⬜ ") + c.label(user.language), f"{TOPIC}{mode}:{c.id}")
-                  for c in categories], checkboxes=True)
+    text += L.topics_selected(len(chosen & {c.id for c in categories}) + int(user.cve_alerts))
+    items = [(("✅ " if c.id in chosen else "⬜ ") + c.label(user.language), f"{TOPIC}{mode}:{c.id}")
+             for c in categories]
+    items.append((("✅ " if user.cve_alerts else "⬜ ") + L.BTN_CVE, f"{TOPIC}{mode}:cve"))  # 🛡 CVE reports
+    rows = _grid(items, checkboxes=True)
     rows.append([_button(L.TOPIC_ALL, f"{TOPIC_ALL}{mode}"), _button(L.TOPIC_NONE, f"{TOPIC_NONE}{mode}")])
     if mode == "o":
         rows.append([_button(L.NEXT, f"{TOPIC_SAVE}o"), _button(L.TOPIC_SKIP, f"{TOPIC_SKIP}o")])
@@ -276,8 +280,15 @@ async def topic_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     alert = False
     if prefix == "tpa":
         chosen, toast = set(active), L.TOPICS_ALL_ON
+        user = _cve_turn_on(user)
     elif prefix == "tpn":
         chosen, toast = set(), L.TOPICS_CLEARED
+        user = _cve_turn_off(user)
+    elif rest.endswith(":cve"):  # the 🛡 CVE reports checkbox
+        if user.cve_alerts:
+            user, toast = _cve_turn_off(user), L.topic_removed(L.BTN_CVE)
+        else:
+            user, toast = _cve_turn_on(user), L.topic_added(L.BTN_CVE)
     else:
         category = active.get(int(rest.split(":")[1]))
         if not category:
@@ -303,19 +314,32 @@ async def topic_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     L = tr(user)
     mode = query.data[len(TOPIC_SAVE):]
     chosen = db.interests(user.telegram_id)
-    if mode == "o" and not chosen:
+    if mode == "o" and not chosen and not user.cve_alerts:
         await query.answer(L.TOPIC_NEED_ONE, show_alert=True)
         return
     await query.answer()
-    log.info("User %s has %s topics", user.telegram_id, len(chosen))
+    log.info("User %s has %s topics (CVE reports %s)", user.telegram_id, len(chosen),
+             "on" if user.cve_alerts else "off")
     if mode == "o":
-        if _source_groups(user, "o"):
-            await _show_sources(update, context, user, "o")
-        else:
-            await _show_delivery_step(update, context, user)
+        if user.cve_alerts and not user.cve_all_technologies and not db.user_technologies(user.telegram_id):
+            # CVE reports ticked: pick technologies first (➡️ Next there continues onboarding).
+            context.user_data["cve_onboarding"] = True
+            await _show(update, context, *_cve_picker(user, 0, onboarding=True))
+            return
+        await _onboarding_after_topics(update, context, user)
         return
     user = db.update_user(user.telegram_id, onboarding_completed=True)
-    await _show(update, context, L.interests_saved(_topic_names(user)) if chosen else L.INTERESTS_EMPTY, None)
+    await _show(update, context, L.interests_saved(_topic_names(user)) if chosen or user.cve_alerts
+                else L.INTERESTS_EMPTY, None)
+
+
+async def _onboarding_after_topics(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
+    """Onboarding after topics (and technologies): the sources step if any source covers the topics,
+    then how news should arrive."""
+    if _source_groups(user, "o"):
+        await _show_sources(update, context, user, "o")
+    else:
+        await _show_delivery_step(update, context, user)
 
 
 async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -331,7 +355,8 @@ async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     L = tr(user)
     await query.answer()
     user = db.update_user(user.telegram_id, onboarding_completed=True)
-    text = L.interests_saved(_topic_names(user)) if db.interests(user.telegram_id) else L.ONBOARDING_SKIPPED
+    text = (L.interests_saved(_topic_names(user)) if db.interests(user.telegram_id) or user.cve_alerts
+            else L.ONBOARDING_SKIPPED)
     await _show(update, context, text, None)
     await _send(context, update.effective_chat.id, L.MENU_HINT, main_keyboard(user))
 
@@ -815,7 +840,9 @@ def _cve_pages() -> list[str]:
     return [g for g in TECH_GROUPS if g in present] + ["own"]
 
 
-def _cve_picker(user: User, page: int) -> tuple[str, InlineKeyboardMarkup]:
+def _cve_picker(user: User, page: int, onboarding: bool = False) -> tuple[str, InlineKeyboardMarkup]:
+    """One page of technologies. In onboarding the last button is ➡️ Next (on with onboarding) instead of
+    ✅ Done (back to the CVE screen)."""
     L = tr(user)
     pages = _cve_pages()
     page = min(max(page, 0), len(pages) - 1)
@@ -837,8 +864,10 @@ def _cve_picker(user: User, page: int) -> tuple[str, InlineKeyboardMarkup]:
     rows.append([_button("◀️", f"{CVE}p:{page - 1}") if page > 0 else _button(" ", NOOP),
                  _button(f"{page + 1}/{len(pages)}", NOOP),
                  _button("▶️", f"{CVE}p:{page + 1}") if page < len(pages) - 1 else _button(" ", NOOP)])
-    rows.append([_button(L.DONE, CVE_MENU)])
-    return L.cve_picker_title(title, page + 1, len(pages), len(mine)) + "\n" + body, InlineKeyboardMarkup(rows)
+    rows.append([_button(L.NEXT, f"{CVE}onext")] if onboarding else [_button(L.DONE, CVE_MENU)])
+    head = (L.CVE_ONBOARDING_PROMPT + "\n\n") if onboarding and page == 0 else ""
+    return (head + L.cve_picker_title(title, page + 1, len(pages), len(mine)) + "\n" + body,
+            InlineKeyboardMarkup(rows))
 
 
 def _cve_turn_on(user: User) -> User:
@@ -846,6 +875,17 @@ def _cve_turn_on(user: User) -> User:
         return user
     log.info("User %s turned CVE reports on", user.telegram_id)
     return db.update_user(user.telegram_id, cve_alerts=True, cve_enabled_at=now_utc().isoformat())
+
+
+def _cve_turn_off(user: User) -> User:
+    """CVE reports off; CVE alerts still waiting to be sent are dropped."""
+    if not user.cve_alerts:
+        return user
+    db.execute("UPDATE notifications n SET status = 'skipped', last_error = 'CVE reports turned off'"
+               " FROM cves c WHERE c.article_id = n.article_id AND n.user_id = %s"
+               " AND n.status IN ('queued', 'digest')", (user.telegram_id,))
+    log.info("User %s turned CVE reports off", user.telegram_id)
+    return db.update_user(user.telegram_id, cve_alerts=False)
 
 
 async def cve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -876,6 +916,12 @@ async def cve_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if action == "csv":
         await _send_cve_csv(update, context, user)
         return
+    if action == "onext":  # ➡️ Next on the onboarding technology picker
+        context.user_data.pop("cve_onboarding", None)
+        context.user_data.pop("cve_adding", None)
+        await query.answer()
+        await _onboarding_after_topics(update, context, user)
+        return
     if action == "add":
         context.user_data["cve_adding"] = True
         await query.answer()
@@ -889,10 +935,7 @@ async def cve_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             user = _cve_turn_on(user)
             toast = L.CVE_ON_TOAST
         else:
-            user = db.update_user(user.telegram_id, cve_alerts=False)
-            db.execute("UPDATE notifications n SET status = 'skipped', last_error = 'CVE reports turned off'"
-                       " FROM cves c WHERE c.article_id = n.article_id AND n.user_id = %s"
-                       " AND n.status IN ('queued', 'digest')", (user.telegram_id,))
+            user = _cve_turn_off(user)
             toast = L.CVE_OFF_TOAST
     elif action == "all":
         user = db.update_user(user.telegram_id, cve_all_technologies=not user.cve_all_technologies)
@@ -936,7 +979,7 @@ async def cve_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             else:
                 toast, alert = L.CVE_TECH_GONE, True
         await query.answer(toast, show_alert=alert)
-        await _show(update, context, *_cve_picker(user, page))
+        await _show(update, context, *_cve_picker(user, page, bool(context.user_data.get("cve_onboarding"))))
         return
     await query.answer(toast, show_alert=alert)
     await _show(update, context, *_cve_screen(user))
@@ -987,10 +1030,14 @@ async def cve_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE, user:
     if added:
         user = _cve_turn_on(user)
     log.info("User %s added %s technologies for CVE reports", user.telegram_id, len(added))
+    onboarding = bool(context.user_data.get("cve_onboarding"))
     await _send(context, update.effective_chat.id,
                 L.cve_added([html.escape(n) for n in added], [html.escape(n) for n in existing],
-                            [html.escape(n) for n in bad]), main_keyboard(user))
-    await _send(context, update.effective_chat.id, *_cve_screen(user))
+                            [html.escape(n) for n in bad]), None if onboarding else main_keyboard(user))
+    if onboarding:  # back to the picker (its last page shows their own words) with ➡️ Next
+        await _send(context, update.effective_chat.id, *_cve_picker(user, len(_cve_pages()) - 1, onboarding=True))
+    else:
+        await _send(context, update.effective_chat.id, *_cve_screen(user))
 
 
 async def _send_cve_csv(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
@@ -1004,14 +1051,14 @@ async def _send_cve_csv(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["cve_id", "published", "severity", "cvss_score", "actively_exploited", "ransomware",
-                     "matched", "description", "nvd_link"])
+                     "matched", "matched_by", "products", "description", "nvd_link"])
     for r in rows:
         when = r["published_at"] or r["fetched_at"]
         writer.writerow([r["cve_id"], to_local(when).strftime("%Y-%m-%d %H:%M") if when else "",
                          r["severity"] or "", "" if r["cvss_score"] is None else r["cvss_score"],
                          "yes" if r["kev"] else "no", "yes" if r["kev_ransomware"] else "no",
                          "all technologies" if r["matched"] == "*" else (r["matched"] or ""),
-                         r["description"], r["canonical_url"]])
+                         r["match_source"] or "", "; ".join(r["products"] or []), r["description"], r["canonical_url"]])
     data = ("\ufeff" + out.getvalue()).encode("utf-8")  # BOM: Excel opens it as UTF-8
     name = f"cve-report_{local_today().isoformat()}.csv"
     await context.bot.send_document(update.effective_chat.id, document=data, filename=name,
@@ -1325,7 +1372,7 @@ def build_application(request=None) -> Application:
     app.add_handler(MessageHandler(private & filters.Text([texts.LANGUAGE_BUTTON]), choose_language))
 
     app.add_handler(CallbackQueryHandler(set_language, pattern=rf"^{SET_LANGUAGE}[a-z]{{2}}$"))
-    app.add_handler(CallbackQueryHandler(topic_tap, pattern=rf"^({TOPIC}[oi]:\d+|{TOPIC_ALL}[oi]|{TOPIC_NONE}[oi])$"))
+    app.add_handler(CallbackQueryHandler(topic_tap, pattern=rf"^({TOPIC}[oi]:(\d+|cve)|{TOPIC_ALL}[oi]|{TOPIC_NONE}[oi])$"))
     app.add_handler(CallbackQueryHandler(topic_save, pattern=rf"^{TOPIC_SAVE}[oi]$"))
     app.add_handler(CallbackQueryHandler(topic_skip, pattern=rf"^{TOPIC_SKIP}[oi]$"))
     app.add_handler(CallbackQueryHandler(onboarding_delivery, pattern=rf"^{ONBOARD_DELIVERY}(instant|digest)$"))
@@ -1338,7 +1385,7 @@ def build_application(request=None) -> Application:
     app.add_handler(CallbackQueryHandler(backup_action, pattern=rf"^{BACKUP}(now|on|off)$"))
     app.add_handler(CallbackQueryHandler(pull_news, pattern=f"^{PULL_MORE}$"))
     app.add_handler(CallbackQueryHandler(
-        cve_action, pattern=rf"^{CVE}(menu|on|off|all|sev|sev:[A-Z]+|p:\d+|t:\d+:\d+|r:\d+:[0-9a-f]{{8}}|add|addx|csv|close)$"))
+        cve_action, pattern=rf"^{CVE}(menu|on|off|all|sev|sev:[A-Z]+|p:\d+|t:\d+:\d+|r:\d+:[0-9a-f]{{8}}|add|addx|csv|close|onext)$"))
     app.add_handler(CallbackQueryHandler(noop, pattern=f"^{NOOP}$"))
     app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, text_message))

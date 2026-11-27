@@ -384,7 +384,7 @@ def test_menus_are_checkbox_grids(chat):
             assert not any("⠀" in label for row in rows for label in row)  # no invisible padding
         topic_rows = [[b["text"] for b in row] for row in screens["topics"]["reply_markup"]["inline_keyboard"]
                       if row[0]["callback_data"].startswith("tp:")]
-        assert sum(len(row) for row in topic_rows) == len(db.categories())
+        assert sum(len(row) for row in topic_rows) == len(db.categories()) + 1  # + 🛡 CVE reports
         assert sum(1 for row in topic_rows if len(row) >= 2) >= 4  # mostly 2-3 per row
         assert any(len(row) == 3 for row in _rows(screens["digest"]))  # short labels: 3 per row
 

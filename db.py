@@ -181,6 +181,7 @@ class Notification:
     created_at: str
     updated_at: str
     matched: str | None = None  # CVE alerts: which of the user's technologies matched
+    match_source: str | None = None  # CVE alerts: 'product' or 'description' 
 
 
 # CVE severity, lowest to highest; a user's minimum is one of CVE_MIN_SEVERITIES.
@@ -496,10 +497,12 @@ class Database:
         row = self.execute("SELECT * FROM cves WHERE article_id = %s", (article_id,)).fetchone()
         return _row(Cve, row) if row else None
 
-    def cve_matching_users(self, article: Article, cve: Cve) -> list[tuple[int, None, str]]:
-        """(user_id, None, matched technology) for everyone who should get this CVE: CVE reports on, account
-        active, alerts not paused, severity at or above their minimum (or actively exploited), and one of
-        their technologies (added before the CVE was found) named in it — or they chose all technologies."""
+    def cve_matching_users(self, article: Article, cve: Cve) -> list[tuple[int, None, str, str | None]]:
+        """(user_id, None, matched technology, match source) for everyone who should get this CVE: CVE
+        reports on, account active, alerts not paused, severity at or above their minimum (or actively
+        exploited), and one of their technologies (added before the CVE was found) in it — or they chose
+        all technologies. Once the CVE has product data (from NIST's analysis or CISA), only the products
+        count ('product'): that's precise. Before that, the description is used ('description')."""
         from news import cve_term_matches  # avoid a circular import at load time
         rank = SEVERITY_RANK.get(cve.severity, 0)
         users = self.execute(
@@ -517,17 +520,20 @@ class Database:
         for t in terms:
             aliases = plain(t)["aliases"] if t["name"] else [t["term"]]
             by_user.setdefault(t["user_id"], []).append((t["name"] or t["term"], aliases))
-        text = " ".join([article.title, cve.description, " ".join(cve.products)])
+        if cve.products:
+            text, source = " | ".join(cve.products), "product"
+        else:
+            text, source = " ".join([article.title, cve.description]), "description"
         matches = []
         for u in users:
             if not cve.kev and rank < CVE_MIN_SEVERITIES.get(u["cve_min_severity"], 3):
                 continue
             hit = next((name for name, aliases in by_user.get(u["telegram_id"], [])
                         if cve_term_matches(text, aliases)), None)
-            if hit is None and u["cve_all_technologies"]:
-                hit = "*"
             if hit is not None:
-                matches.append((u["telegram_id"], None, hit))
+                matches.append((u["telegram_id"], None, hit, source))
+            elif u["cve_all_technologies"]:
+                matches.append((u["telegram_id"], None, "*", None))
         return matches
 
     def seed_technologies(self, technologies: list[dict]) -> int:
@@ -569,7 +575,7 @@ class Database:
     def recent_cves(self, user: User, limit: int = 200) -> list[dict]:
         """The user's CVE alerts (sent, pulled or waiting), newest first, for the CSV report."""
         rows = self.execute(
-            """SELECT c.*, a.title, a.canonical_url, a.published_at, a.fetched_at, n.matched, n.status
+            """SELECT c.*, a.title, a.canonical_url, a.published_at, a.fetched_at, n.matched, n.match_source, n.status
                FROM notifications n JOIN cves c ON c.article_id = n.article_id JOIN articles a ON a.id = n.article_id
                WHERE n.user_id = %s ORDER BY a.id DESC LIMIT %s""", (user.telegram_id, limit)).fetchall()
         return [plain(r) for r in rows]
@@ -751,8 +757,8 @@ class Database:
         return list(best.items())
 
     def queue_notifications(self, article: Article, matches: list[tuple]) -> int:
-        """Queue one notification per (user, category[, matched technology]). Users in digest mode get it
-        held for their digest;
+        """Queue one notification per (user, category[, matched technology[, match source]]). Users in
+        digest mode get it held for their digest;
         users over their daily limit get it marked skipped. Unique constraints make this safe to repeat
         (same article, or another article of the same story). Returns how many were newly queued."""
         if not matches:
@@ -763,6 +769,7 @@ class Database:
         for match in matches:
             user_id, category_id = match[0], match[1]
             matched = match[2] if len(match) > 2 else None
+            source = match[3] if len(match) > 3 else None
             user = self.get_user(user_id)
             if not user:
                 continue
@@ -776,9 +783,10 @@ class Database:
                     status, error = "skipped", "daily limit reached"
             cur = self.execute(
                 """INSERT INTO notifications (user_id, article_id, cluster_id, category_id, status,
-                       next_attempt_at, last_error, matched, created_at, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
-                (user_id, article.id, article.cluster_id, category_id, status, now, error, matched, now, now))
+                       next_attempt_at, last_error, matched, match_source, created_at, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                (user_id, article.id, article.cluster_id, category_id, status, now, error, matched, source,
+                 now, now))
             queued += cur.rowcount if status != "skipped" else 0
         return queued
 

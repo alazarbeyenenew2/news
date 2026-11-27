@@ -174,6 +174,7 @@ class Collector:
                 continue
             if first_fetch:
                 article["is_backlog"] = True
+                article["first_fetch"] = True
             status, queued = self._store(provider, article, rules, recent)
             counts[status] += 1
             counts["queued"] += queued
@@ -220,15 +221,21 @@ class Collector:
     def _store_cve(self, provider: Provider, article: dict, cve: dict) -> tuple[str, int]:
         """A CVE (from NVD or CISA KEV). It isn't put into topics, so it never floods Cybersecurity
         followers; it reaches only people whose CVE reports match it. The same CVE from both sources is
-        one article (same NVD link): the second just adds what it knows, e.g. "actively exploited",
-        and people that newly qualifies for are alerted."""
+        one article (same NVD link). When a CVE we have gains something that changes who should get it
+        (NIST's product data or severity, CISA's "actively exploited"), it's matched again: people it now
+        qualifies for are alerted, and nobody gets it twice."""
         existing = (db.article_by_external_id(provider.id, article["external_id"])
                     if article["external_id"] else None) or db.article_by_url(article["canonical_url"])
         if existing:
-            if existing.provider_id == provider.id and existing.external_id == article["external_id"]:
-                return "duplicate", 0
+            before = db.get_cve(existing.id)
             db.upsert_cve(existing.id, cve)
-            if existing.is_backlog or article["is_backlog"]:
+            after = db.get_cve(existing.id)
+            changed = (before is None or after.products != before.products or after.severity != before.severity
+                       or (after.kev and not before.kev))
+            if not changed:
+                return "duplicate", 0
+            metrics.inc("cves_updated")
+            if existing.is_backlog or article.get("first_fetch"):
                 return "duplicate", 0
             return "duplicate", self.match(existing.id)
         article["story_cluster_id"] = None

@@ -252,3 +252,125 @@ def test_csv_report(chat):
     rows = list(csv.DictReader(io.StringIO(content.decode("utf-8-sig"))))
     assert rows[0]["cve_id"] == "CVE-2026-50001" and rows[0]["severity"] == "CRITICAL"
     assert rows[0]["matched"] == "nginx" and rows[0]["nvd_link"].endswith("CVE-2026-50001")
+
+
+# ---------- product data ----------
+def test_products_only_vulnerable_and_with_platform():
+    configs = [{"nodes": [{"cpeMatch": [
+        {"vulnerable": True, "criteria": "cpe:2.3:a:acme:forms_plugin:*:*:*:*:*:wordpress:*:*"},
+        {"vulnerable": False, "criteria": "cpe:2.3:o:microsoft:windows:-:*:*:*:*:*:*:*"},
+        {"vulnerable": True, "criteria": "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*"}]}]}]
+    assert cves.products(configs) == ["acme forms plugin (wordpress)", "f5 nginx"]
+
+
+def _cve(cve_id, description, products=None, severity="HIGH", score=8.1, update=False):
+    item = cves.parse_nvd_cve({"id": cve_id, "published": now_utc().strftime("%Y-%m-%dT%H:%M:%S.000"),
+                               "vulnStatus": "Analyzed" if products else "Received",
+                               "descriptions": [{"lang": "en", "value": description}]})
+    item.extra["cve"].update(products=products or [], severity=severity, cvss_score=score)
+    if update:
+        item.extra["cve"]["update"] = True
+    return item
+
+
+def test_product_data_wins_over_the_description():
+    make_user(1, techs=["nginx"])
+    make_user(2, techs=["wordpress"])
+    collect([_cve("CVE-2026-60001", "The Acme Forms plugin exposes files on Apache and NGINX servers.",
+                  products=["acme forms plugin (wordpress)"]),
+             _cve("CVE-2026-60002", "A request smuggling flaw in the HTTP/2 module.", products=["f5 nginx"])])
+    assert alerts(1) == {"CVE-2026-60002": ("queued", "nginx")}   # not the plugin that only mentions nginx
+    assert alerts(2) == {"CVE-2026-60001": ("queued", "WordPress")}  # plugins carry their platform
+    sources = {r["matched"]: r["match_source"] for r in db.execute("SELECT matched, match_source FROM notifications")}
+    assert sources == {"nginx": "product", "WordPress": "product"}
+
+
+def test_alert_when_nist_adds_product_data_later():
+    make_user(1, techs=["windows"])  # High and above
+    first = _cve("CVE-2026-60003", "An elevation of privilege flaw in a kernel driver.", severity=None, score=None)
+    collect([first])
+    assert alerts(1) == {}  # no product data, no severity, and the description doesn't say Windows
+    later = _cve("CVE-2026-60003", "An elevation of privilege flaw in a kernel driver.",
+                 products=["microsoft windows 11 24h2"], severity="HIGH", score=7.8, update=True)
+    counts = collect([later])
+    assert counts == {"new": 0, "duplicate": 1, "invalid": 0, "queued": 1}
+    assert alerts(1) == {"CVE-2026-60003": ("queued", "Windows")}
+    cve = db.get_cve(db.article_by_url("https://nvd.nist.gov/vuln/detail/CVE-2026-60003").id)
+    assert cve.products == ["microsoft windows 11 24h2"] and cve.severity == "HIGH" and cve.cvss_score == 7.8
+    assert collect([later])["queued"] == 0  # same data again: nothing new, nothing twice
+
+
+def test_alert_shows_how_it_matched(telegram):
+    make_user(1, techs=["nginx"])
+    collect([_cve("CVE-2026-60002", "A request smuggling flaw in the HTTP/2 module.", products=["f5 nginx"])])
+    bot = Bot(config.BOT_TOKEN, request=telegram, get_updates_request=telegram)
+    asyncio.run(bot.initialize())
+    sender = Sender(bot)
+    asyncio.run(sender.send_one(db.due_notifications()[0]))
+    assert "🧩 Matches: nginx <i>(NVD product data)</i>" in telegram.last("sendMessage")["text"]
+
+
+def test_nvd_adapter_also_asks_for_updates(monkeypatch):
+    asked = []
+    old = (now_utc() - timedelta(days=200)).strftime("%Y-%m-%dT%H:%M:%S.000")
+    updated = {"resultsPerPage": 2, "startIndex": 0, "totalResults": 2, "vulnerabilities": [
+        {"cve": {"id": "CVE-2026-50001", "published": now_utc().strftime("%Y-%m-%dT%H:%M:%S.000"),
+                 "vulnStatus": "Analyzed", "descriptions": [{"lang": "en", "value": "nginx HTTP/3 overflow."}]}},
+        {"cve": {"id": "CVE-2025-1", "published": old, "vulnStatus": "Modified",
+                 "descriptions": [{"lang": "en", "value": "An old CVE NIST touched today."}]}}]}
+
+    async def fake_get(url, **kwargs):
+        asked.append("lastMod" if "lastModStartDate" in url else "pub")
+        body = updated if "lastModStartDate" in url else {**NVD, "vulnerabilities": []}
+        return type("R", (), {"status_code": 200, "content": json.dumps(body).encode(), "headers": {}, "url": url})()
+
+    async def no_sleep(_):
+        return None
+    monkeypatch.setattr(cves, "safe_get", fake_get)
+    monkeypatch.setattr(cves.asyncio, "sleep", no_sleep)
+    nvd = provider("nvd")  # fetched before: asks for updates too
+    result = asyncio.run(cves.NvdAdapter().fetch(nvd))
+    assert asked == ["pub", "lastMod"]
+    assert [i.external_id for i in result.items] == ["CVE-2026-50001"]  # the 200-day-old one is skipped
+    assert result.items[0].extra["cve"]["update"] is True
+
+
+# ---------- in the topic list ----------
+def test_cve_reports_in_the_topic_list(chat):
+    labels = [b["text"] for b in _buttons(chat.send("/interests").last("sendMessage"))]
+    assert "⬜ 🛡 CVE reports" in labels
+    api = chat.tap("tp:i:cve")
+    assert api.last("answerCallbackQuery")["text"] == "✅ 🛡 CVE reports added"
+    assert db.get_user(100).cve_alerts
+    assert "✅ 🛡 CVE reports" in [b["text"] for b in _buttons(api.last("editMessageText"))]
+    assert "🛡 CVE reports" in chat.tap("tps:i").last("editMessageText")["text"]  # in "Topics saved"
+    chat.send("/interests")
+    assert chat.tap("tp:i:cve").last("answerCallbackQuery")["text"] == "⬜ 🛡 CVE reports removed"
+    assert not db.get_user(100).cve_alerts
+
+
+def test_onboarding_with_cve_reports_asks_for_technologies(telegram):
+    c = Chat(telegram)
+    try:
+        c.send("/start")
+        c.tap("lang:en")
+        c.tap("tp:o:cve")  # only CVE reports: enough to go on
+        api = c.tap("tps:o")
+        page = api.last("editMessageText")
+        assert "Which technologies do you use?" in page["text"]
+        assert [b["text"] for b in _buttons(page)][-1] == texts_en.NEXT
+        windows = next(t for t in db.technologies() if t.key == "windows")
+        c.tap(f"cv:t:0:{windows.id}")
+        assert [b["text"] for b in _buttons(c.api.last("editMessageText"))][-1] == texts_en.NEXT  # still onboarding
+        # Typed names come back to the picker, not the CVE screen.
+        c.tap("cv:add")
+        api = c.send("my-portal")
+        assert "Your own" in api.last("sendMessage")["text"]
+        api = c.tap("cv:onext")
+        assert "How should news reach you" in api.last("editMessageText")["text"]  # no topics: no sources step
+        c.tap("ob:instant")
+        user = db.get_user(100)
+        assert user.onboarding_completed and user.cve_alerts
+        assert {t["name"] for t in db.user_technologies(100)} == {"Windows", "my-portal"}
+    finally:
+        c.close()

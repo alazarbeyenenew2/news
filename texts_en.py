@@ -352,6 +352,7 @@ KEV_LABEL = "Actively exploited"
 RANSOMWARE_LABEL = "💀 used by ransomware"
 CVE_MATCHES = "Matches"
 CVE_ALL_TECH = "all technologies"
+CVE_MATCH_SOURCES = {"product": "NVD product data", "description": "mentioned in the description"}
 CVE_DETAILS = "📖 Details (NVD)"
 CVE_SETTINGS_BUTTON = "🛡 CVE settings"
 CVE_TURN_ON = "🔔 Turn on"
@@ -375,6 +376,10 @@ CVE_ADD_PROMPT = ("✍️ <b>Add your own technologies</b>\n"
                   "<code>nginx, Windows Server 2022, FortiGate, Moodle</code>\n\n"
                   "<i>A CVE matches when its description names one of them as a whole word.</i>")
 CVE_ADD_CANCELLED = "✖️ Cancelled"
+CVE_ONBOARDING_PROMPT = ("🛡 <b>Which technologies do you use?</b>\n"
+                         "You'll get an alert when a new vulnerability (CVE) affects one of them. Tick them here or "
+                         "add your own on the last page, then <b>➡️ Next</b>. You can change this any time in "
+                         "🛡 CVE reports.")
 CVE_TECH_GONE = "That technology isn't on your list any more."
 CVE_ON_TOAST = "🔔 CVE reports on"
 CVE_OFF_TOAST = "⏸ CVE reports off"

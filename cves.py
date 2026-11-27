@@ -47,14 +47,22 @@ def cvss(metrics: dict) -> tuple[float | None, str | None, str | None]:
 
 
 def products(configurations: list) -> list[str]:
-    """'vendor product' names from the CPE entries NVD adds once it has analysed a CVE."""
+    """'vendor product' names of the vulnerable products in the CPE data NIST adds once it has analysed a
+    CVE (usually days after publication). Platforms a product merely runs on (vulnerable: false, e.g.
+    Windows under an app) are left out. A target platform is kept in brackets, so a WordPress plugin is
+    "vendor plugin (wordpress)"."""
     names = []
     for config_ in configurations or []:
         for node in config_.get("nodes", []):
             for match in node.get("cpeMatch", []):
+                if match.get("vulnerable") is False:
+                    continue
                 parts = (match.get("criteria") or "").split(":")
                 if len(parts) > 4:
                     name = f"{parts[3]} {parts[4]}".replace("_", " ")
+                    target = parts[10] if len(parts) > 10 else "*"
+                    if target not in ("*", "-", ""):
+                        name += f" ({target.replace('_', ' ')})"
                     if name not in names:
                         names.append(name)
     return names[:30]
@@ -83,14 +91,30 @@ def parse_nvd_cve(cve: dict) -> RawArticle | None:
 
 
 class NvdAdapter:
-    """CVEs published since the last successful fetch, from https://services.nvd.nist.gov/rest/json/cves/2.0.
-    Set NVD_API_KEY for NIST's higher rate limit (optional)."""
+    """From https://services.nvd.nist.gov/rest/json/cves/2.0: CVEs published since the last successful
+    fetch, plus CVEs NIST updated since then (it adds product data and severity days after publication),
+    limited to ones published in the last ARTICLE_RETENTION_DAYS. Set NVD_API_KEY for NIST's higher rate
+    limit (optional)."""
 
     async def fetch(self, provider: Provider) -> FetchResult:
         end = now_utc()
         last = parse_iso(provider.last_success_at)
         start = (last - NVD_OVERLAP) if last else end - NVD_FIRST_WINDOW
         start = max(start, end - timedelta(days=119))  # NVD allows at most 120 days per request
+        items = await self._query(provider, "pub", start, end)
+        if last:  # not on the first fetch: everything then is stored as backlog anyway
+            await asyncio.sleep(1 if config.NVD_API_KEY else NVD_PAUSE_SECONDS)
+            known = {i.external_id for i in items}
+            oldest = end - timedelta(days=config.ARTICLE_RETENTION_DAYS or 30)
+            for item in await self._query(provider, "lastMod", start, end):
+                if item.external_id in known or (item.published_at and item.published_at < oldest):
+                    continue
+                item.extra["cve"]["update"] = True
+                items.append(item)
+        return FetchResult(items=items)
+
+    async def _query(self, provider: Provider, kind: str, start: datetime, end: datetime) -> list[RawArticle]:
+        """All pages of one NVD query: kind "pub" (published in the window) or "lastMod" (changed in it)."""
         headers = {"Accept": "application/json"}
         if config.NVD_API_KEY:
             headers["apiKey"] = config.NVD_API_KEY
@@ -99,7 +123,7 @@ class NvdAdapter:
         for page in range(NVD_MAX_PAGES):
             if page:
                 await asyncio.sleep(1 if config.NVD_API_KEY else NVD_PAUSE_SECONDS)
-            query = urlencode({"pubStartDate": _nvd_time(start), "pubEndDate": _nvd_time(end),
+            query = urlencode({f"{kind}StartDate": _nvd_time(start), f"{kind}EndDate": _nvd_time(end),
                                "resultsPerPage": NVD_PAGE_SIZE, "startIndex": index})
             response = await safe_get(f"{provider.feed_url}?{query}", headers=headers,
                                       timeout=provider.timeout_seconds, max_bytes=MAX_BYTES)
@@ -116,7 +140,7 @@ class NvdAdapter:
             index += int(data.get("resultsPerPage") or NVD_PAGE_SIZE)
             if index >= int(data.get("totalResults") or 0):
                 break
-        return FetchResult(items=items)
+        return items
 
 
 def _nvd_time(dt: datetime) -> str:

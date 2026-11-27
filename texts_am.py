@@ -351,6 +351,7 @@ KEV_LABEL = "በጥቃት ላይ የዋለ"
 RANSOMWARE_LABEL = "💀 በራንሰምዌር ጥቅም ላይ የዋለ"
 CVE_MATCHES = "የተገናኘው"
 CVE_ALL_TECH = "ሁሉም ቴክኖሎጂዎች"
+CVE_MATCH_SOURCES = {"product": "የNVD የምርት መረጃ", "description": "በመግለጫው የተጠቀሰ"}
 CVE_DETAILS = "📖 ዝርዝር (NVD)"
 CVE_SETTINGS_BUTTON = "🛡 የCVE ቅንብሮች"
 CVE_TURN_ON = "🔔 አብራ"
@@ -374,6 +375,9 @@ CVE_ADD_PROMPT = ("✍️ <b>የራስዎን ቴክኖሎጂዎች ይጨምሩ<
                   "<code>nginx, Windows Server 2022, FortiGate, Moodle</code>\n\n"
                   "<i>CVE የሚገናኘው መግለጫው ከነዚህ አንዱን እንደ ሙሉ ቃል ሲጠቅስ ነው።</i>")
 CVE_ADD_CANCELLED = "✖️ ተሰርዟል"
+CVE_ONBOARDING_PROMPT = ("🛡 <b>የትኞቹን ቴክኖሎጂዎች ይጠቀማሉ?</b>\n"
+                         "ከነሱ አንዱን አዲስ የደህንነት ክፍተት (CVE) ሲነካ ማሳወቂያ ይደርስዎታል። እዚህ ይምረጡ ወይም በመጨረሻው ገጽ "
+                         "የራስዎን ይጨምሩ፣ ከዚያ <b>➡️ ቀጥል</b>ን ይጫኑ። በማንኛውም ጊዜ በ🛡 የCVE ሪፖርቶች መቀየር ይችላሉ።")
 CVE_TECH_GONE = "ይህ ቴክኖሎጂ ከዝርዝርዎ የለም።"
 CVE_ON_TOAST = "🔔 የCVE ሪፖርቶች በርተዋል"
 CVE_OFF_TOAST = "⏸ የCVE ሪፖርቶች ጠፍተዋል"
