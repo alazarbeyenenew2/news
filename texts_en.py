@@ -105,7 +105,7 @@ def auto_saved(topics: str, instant: bool, hour: int) -> str:
             "Change anything with the buttons below: 🗞 My topics, 📚 Sources, ⚙️ Settings.")
 
 
-WELCOME_NEWS_INTRO = "📰 <b>Today's news so far</b> for your topics:"
+WELCOME_NEWS_INTRO = "📰 <b>The latest news</b> to get you started:"
 
 ONBOARDING_SKIPPED = (f"👌 No topics yet.\n{LINE}\n"
                       "You won't get alerts until you choose some. Tap <b>🗞 My topics</b> "

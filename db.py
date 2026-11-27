@@ -827,11 +827,13 @@ class Database:
         return queued
 
     # ---------- pulling today's news on demand ----------
-    def pull_candidates(self, user: User, since: str, limit: int) -> tuple[list[tuple[Article, int]], int]:
+    def pull_candidates(self, user: User, since: str, limit: int,
+                        any_topic: bool = False) -> tuple[list[tuple[Article, int]], int]:
         """Stories from `since` (start of today) for the user's topics (confident, not muted, topic on) in
         their news language that they haven't received yet, newest first: one article per story.
         Unlike alerts, this includes stories found while they were paused, over their daily limit, held
-        for their digest, or found before they chose the topic. Returns ([(article, category_id)], total)."""
+        for their digest, or found before they chose the topic. any_topic: stories from every topic except
+        ones the user muted (to fill up the welcome batch). Returns ([(article, category_id)], total)."""
         rows = self.execute(
             """
             WITH eligible AS (
@@ -840,8 +842,9 @@ class Database:
                 FROM articles a
                 JOIN article_categories ac ON ac.article_id = a.id AND ac.confidence >= %(threshold)s
                 JOIN categories c ON c.id = ac.category_id AND c.is_active
-                JOIN user_interests i ON i.category_id = ac.category_id AND i.user_id = %(user)s AND i.is_enabled
-                WHERE COALESCE(a.published_at, a.fetched_at) >= %(since)s
+                LEFT JOIN user_interests i ON i.category_id = ac.category_id AND i.user_id = %(user)s
+                WHERE (i.is_enabled OR (%(any_topic)s AND i.user_id IS NULL))
+                  AND COALESCE(a.published_at, a.fetched_at) >= %(since)s
                   AND (%(language)s = 'any' OR a.language = %(language)s)
                   AND NOT EXISTS (SELECT 1 FROM user_source_exclusions x
                                   WHERE x.user_id = %(user)s AND x.provider_id = a.provider_id)
@@ -857,7 +860,7 @@ class Database:
             ORDER BY COALESCE(published_at, fetched_at) DESC, id DESC LIMIT %(limit)s
             """,
             {"threshold": config.CLASSIFY_MIN_CONFIDENCE, "user": user.telegram_id, "since": since, "now": _now(),
-             "language": user.news_language, "limit": limit}).fetchall()
+             "language": user.news_language, "limit": limit, "any_topic": any_topic}).fetchall()
         total = rows[0]["total"] if rows else 0
         return [(_row(Article, r), r["pull_category_id"]) for r in rows], total
 

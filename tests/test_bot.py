@@ -598,3 +598,36 @@ def test_digest_time_picker_offers_instantly(chat):
     assert db.get_user(USER).delivery_mode == "instant"
     first = api.last("editMessageText")["reply_markup"]["inline_keyboard"][0][0]
     assert first["text"].startswith("✅")  # the picker stays open with ⚡ Instantly ticked
+
+
+def _join_with_sports(chat):
+    chat.send("/start")
+    chat.tap("lang:en")
+    chat.tap(f"tp:o:{cid('sports')}")
+    chat.tap("tps:o")
+    chat.tap("srx:o")
+    return chat.tap("ob:instant")
+
+
+def test_new_users_get_ten_latest_stories(chat):
+    titles = SPORTS + ["Chelsea sign Brazilian striker on loan", "Boxing champion defends heavyweight belt",
+                       "Golf major heads into dramatic playoff", "Cycling team crashes out of Tour stage",
+                       "Swimming world record broken in relay", "Volleyball league crowns new champion"]
+    _stories("bbc_sport", "s", titles)  # 13 sports stories today
+    api = _join_with_sports(chat)
+    assert len(_alerts(api)) == 10
+    assert any("3 more waiting" in (p.get("text") or "") for m, p in api.calls if m == "sendMessage")
+
+
+def test_welcome_news_tops_up_with_other_topics(chat):
+    _stories("bbc_sport", "s", SPORTS[:3])
+    _stories("thehackernews", "c", [
+        "Ransomware gang hits hospital network", "Zero-day exploit found in popular VPN", "Phishing campaign targets bank customers",
+        "Malware hidden in browser extensions", "Data breach exposes millions of passwords", "Hackers exploit unpatched firewall flaw",
+        "Botnet hijacks home routers worldwide", "Spyware vendor sanctioned over hacking tools", "Critical vulnerability patched in mail server",
+        "Cyberattack disrupts city council systems"])
+    api = _join_with_sports(chat)
+    shown = _alerts(api)
+    assert len(shown) == 10
+    assert sum("The Hacker News" in t for t in shown) == 7  # 3 sports first, then today's latest from other topics
+    assert not any("more waiting" in (p.get("text") or "") for m, p in api.calls if m == "sendMessage")

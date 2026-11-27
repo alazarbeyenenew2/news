@@ -104,7 +104,7 @@ def auto_saved(topics: str, instant: bool, hour: int) -> str:
             "ማንኛውንም ከታች ባሉት ቁልፎች ይቀይሩ፦ 🗞 የኔ ርዕሶች፣ 📚 ምንጮች፣ ⚙️ ቅንብሮች።")
 
 
-WELCOME_NEWS_INTRO = "📰 <b>የዛሬ ዜናዎች እስካሁን</b> ለርዕሶችዎ፦"
+WELCOME_NEWS_INTRO = "📰 <b>ለመጀመር የቅርብ ጊዜ ዜናዎች</b>፦"
 
 ONBOARDING_SKIPPED = (f"👌 እስካሁን ርዕስ አልመረጡም።\n{LINE}\n"
                       "ርዕስ እስኪመርጡ ማሳወቂያ አይደርስዎትም። ዝግጁ ሲሆኑ <b>🗞 የኔ ርዕሶች</b>ን ይንኩ "

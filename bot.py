@@ -66,6 +66,7 @@ BACKUP = "bk:"           # bk:now | bk:on | bk:off
 PULL_MORE = "pull:more"  # the "more" button under a 📥 Latest news batch
 NOOP = "noop"
 PULL_PAGE = 5  # stories per 📥 Latest news tap
+WELCOME_NEWS_COUNT = 10  # stories a new user gets when they join
 PULL_REFRESH_SECONDS = 12  # how long 📥 Latest news waits for the feeds it re-checks
 CVE = "cv:"  # cv:menu|on|off|all|sev[:<level>]|p:<page>|t:<page>:<tech id>|r:<page>:<hash>|add|addx|csv|close
 CVE_ADAPTERS = ("nvd", "kev")  # CVE providers: managed on the CVE screen, not in 📚 Sources
@@ -841,14 +842,29 @@ async def _deliver_today(bot, user: User, items: list) -> int:
 
 
 async def send_welcome_news(bot, user: User) -> int:
-    """Once per user, when onboarding is done (finished or auto-saved): today's stories for their topics
-    that they haven't received yet, PULL_PAGE of them, with 📥 Show more if there are others.
-    Returns how many were sent."""
+    """Once per user, when onboarding is done (finished or auto-saved): at least WELCOME_NEWS_COUNT of the
+    latest stories, so a new user sees the bot working straight away. Today's stories for their topics
+    come first; if there aren't enough, the last 24 hours for their topics, then today's latest from other
+    topics. 📥 Show more offers the rest of today's for their topics. Returns how many were sent."""
     if user.welcome_news_at:
         return 0
     db.update_user(user.telegram_id, welcome_news_at=now_utc().isoformat())
     L = tr(user)
-    items, total = db.pull_candidates(user, day_start_utc(local_today()), PULL_PAGE)
+    today = day_start_utc(local_today())
+    items, total = db.pull_candidates(user, today, WELCOME_NEWS_COUNT)
+    topic_items = len(items)
+    seen = {a.story_cluster_id or a.id for a, _ in items}
+    fills = [(user, (now_utc() - timedelta(hours=24)).isoformat(), False), (user, today, True)]
+    for who, since, any_topic in fills:
+        if len(items) >= WELCOME_NEWS_COUNT:
+            break
+        more_items, _ = db.pull_candidates(who, since, WELCOME_NEWS_COUNT * 3, any_topic=any_topic)
+        for article, category_id in more_items:
+            if len(items) >= WELCOME_NEWS_COUNT:
+                break
+            if (article.story_cluster_id or article.id) not in seen:
+                seen.add(article.story_cluster_id or article.id)
+                items.append((article, category_id))
     if not items:
         return 0
     try:
@@ -857,7 +873,7 @@ async def send_welcome_news(bot, user: User) -> int:
         log.warning("Welcome news to %s failed: %s", user.telegram_id, e)
         return 0
     sent = await _deliver_today(bot, user, items)
-    remaining = total - len(items)
+    remaining = max(total - topic_items, 0)
     more = InlineKeyboardMarkup([[_button(L.pull_more(remaining), PULL_MORE)]]) if remaining else main_keyboard(user)
     try:
         await bot.send_message(user.chat_id, L.pull_done(sent, remaining), parse_mode=ParseMode.HTML,
