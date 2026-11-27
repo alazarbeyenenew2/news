@@ -196,13 +196,13 @@ def test_settings_digest_limit_language_mute(chat):
     assert db.interests(USER)[cid("sports")] is False
 
 
-def test_delete_my_data(chat):
+def test_there_is_no_delete_my_data(chat):
     onboard(chat)
-    chat.tap("st:del")
-    assert db.get_user(USER) is not None
-    chat.tap("st:delok")
-    assert db.get_user(USER) is None
-    assert db._one("SELECT COUNT(*) FROM user_interests") == 0
+    labels = " ".join(" ".join(row) for row in _rows(chat.send("/settings").last("sendMessage")))
+    assert "Delete" not in labels
+    api = chat.tap("st:delok")  # an old button still in someone's chat just shows Settings
+    assert db.get_user(USER) is not None and len(db.interests(USER)) == 2
+    assert "Daily limit" in api.last("editMessageText")["text"]
 
 
 def test_sources_and_help(chat):

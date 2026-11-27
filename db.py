@@ -371,10 +371,6 @@ class Database:
         return [r["telegram_id"] for r in rows
                 if r["role"] == "admin" or r["telegram_id"] in config.SUPER_ADMIN_IDS]
 
-    def delete_user(self, telegram_id: int) -> None:
-        """Delete a user and everything stored about them (interests and notifications cascade)."""
-        self.execute("DELETE FROM users WHERE telegram_id = %s", (telegram_id,))
-
     # ---------- categories ----------
     def categories(self, active_only: bool = True) -> list[Category]:
         where = "WHERE is_active" if active_only else ""

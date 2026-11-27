@@ -528,7 +528,6 @@ def _settings_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
         (L.SET_TOPICS, f"{SETTINGS}topics"),
         (L.SET_SOURCES, f"{SETTINGS}sources"),
         (L.SET_MUTE, f"{SETTINGS}mute"),
-        (L.SET_DELETE, f"{SETTINGS}del"),
         (L.CLOSE, f"{SETTINGS}close"),
     ])
     return text, InlineKeyboardMarkup(rows)
@@ -623,24 +622,7 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer()
         await _show(update, context, *_mute_screen(user))
         return
-    elif action == "del":
-        await query.answer()
-        await _show(update, context, L.DELETE_CONFIRM, InlineKeyboardMarkup(
-            [[_button(L.DELETE_YES, f"{SETTINGS}delok")], [_button(L.CANCEL, f"{SETTINGS}menu")]]))
-        return
-    elif action == "delok":
-        await query.answer()
-        db.delete_user(user.telegram_id)
-        context.user_data.clear()
-        log.info("User %s deleted their data", user.telegram_id)
-        await _show(update, context, L.DELETED, None)
-        try:
-            await context.bot.delete_my_commands(scope=BotCommandScopeChat(update.effective_chat.id))
-        except TelegramError:
-            pass
-        await _send(context, update.effective_chat.id, "👋", ReplyKeyboardRemove())
-        return
-    else:  # "menu", or anything unexpected
+    else:  # "menu", or anything unexpected (e.g. an old "delete my data" button)
         await query.answer()
     await _show(update, context, *_settings_screen(user))
 

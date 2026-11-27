@@ -137,7 +137,6 @@ SET_LIMIT = "🔢 Daily limit"
 SET_NEWS_LANGUAGE = "🗣 News language"
 SET_MUTE = "🔕 Mute topics"
 SET_TOPICS = "🗞 Topics"
-SET_DELETE = "🗑 Delete my data"
 BACK = "⬅️ Back"
 CLOSE = "✖️ Close"
 
@@ -148,12 +147,6 @@ NEWS_LANGUAGE_PROMPT = "🗣 <b>Which news languages do you want?</b>"
 MUTE_PROMPT = ("🔕 <b>Mute topics</b>\nA muted topic stays in your list but sends no alerts. "
                "Tap to mute or unmute.")
 MUTE_NONE = "You have no topics yet."
-DELETE_CONFIRM = ("🗑 <b>Delete your data?</b>\n"
-                  "Your topics, settings and alert history will be deleted and you'll get no more alerts. "
-                  "This can't be undone. Send /start to use the bot again later.")
-DELETE_YES = "🗑 Yes, delete everything"
-CANCEL = "✖️ Cancel"
-DELETED = "✅ Your data has been deleted. Send /start if you want to come back."
 
 # ---------- digest ----------
 def digest_menu(instant: bool, hour: int) -> str:
@@ -224,10 +217,10 @@ HELP = (f"❓ <b>How {BOT} works</b>\n{LINE}\n"
         "<b>Commands</b>\n"
         "/latest — today's stories you haven't seen yet (📥 Latest news)\n"
         "/interests — choose your topics\n"
-        "/settings — alerts, digest, daily limit, news language, delete your data\n"
+        "/settings — alerts, digest, daily limit, news language, sources\n"
         "/digest — instant alerts or one daily digest\n"
         "/pause, /resume — stop or restart alerts\n"
-        "/sources — where the news comes from\n"
+        "/sources — choose your news sources\n"
         "/language — change the bot language\n\n"
         "<i>The same story from several providers is sent once. Topics don't say anything about "
         "your views and are only used to choose your alerts.</i>")
