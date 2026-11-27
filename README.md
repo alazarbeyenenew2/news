@@ -10,7 +10,7 @@ It's built the same way as the report bot: Python, [python-telegram-bot](https:/
 
 **Onboarding.** After the language, new users get a topic picker: tap topics to tick them (✅ / ⬜, **☑️ Select all**, **⬜ Clear**), then **💾 Save**. Saving needs at least one topic; **Skip for now** finishes without topics and explains how to choose later. Then they pick **⚡ Instant alerts** or **📰 Daily digest**, and get the main keyboard. Returning users aren't onboarded again and keep their settings.
 
-**Keyboard and commands.** Everyone gets **🗞 My topics**, **⚙️ Settings**, **⏸ Pause alerts / ▶️ Resume alerts**, **📰 Digest**, **📚 Sources**, **❓ Help** and **🌐 Language**; admins also get **🛠 Admin**. Commands: `/start`, `/interests`, `/settings`, `/digest`, `/pause`, `/resume`, `/sources`, `/language`, `/help`, `/admin` (admins), `/backup` (super admins). Menus update the same message instead of sending new ones.
+**Keyboard and commands.** Everyone gets **📥 Latest news**, **🗞 My topics**, **⚙️ Settings**, **⏸ Pause alerts / ▶️ Resume alerts**, **📰 Digest**, **📚 Sources**, **❓ Help** and **🌐 Language**; admins also get **🛠 Admin**. Commands: `/start`, `/latest`, `/interests`, `/settings`, `/digest`, `/pause`, `/resume`, `/sources`, `/language`, `/help`, `/admin` (admins), `/backup` (super admins). Menus update the same message instead of sending new ones.
 
 **Settings** (`/settings`): pause / resume; instant or daily digest and its hour; a daily alert limit (10, 20, 30, 50, 100 or none; default `DEFAULT_MAX_PER_DAY`); news language (all, English only, Amharic only); **🔕 Mute topics** (a muted topic stays in the list but sends nothing); **🗑 Delete my data** (after confirmation, deletes the user, their topics and alert history). Changes apply right away, including to alerts already waiting to be sent.
 
@@ -33,6 +33,8 @@ Two to four sentences from the provider's own description.
 - **No backlog**: only stories found after someone chose a topic are sent to them, stories older than `MAX_ARTICLE_AGE_HOURS` (12) when found are never sent, and a newly added provider's first fetch is only stored.
 - **Daily digest** users get one message a day at their hour (in `TIMEZONE`) listing up to `DIGEST_MAX_ARTICLES` stories with links.
 - Paused users get nothing, and stories found while paused aren't sent later. People who block the bot are noticed and not messaged again until they write to it.
+
+**📥 Latest news** (or `/latest`) sends today's stories (since 00:00 `TIMEZONE`) for your topics that you haven't received yet, newest first, 5 at a time with a **📥 Show more** button. It includes stories that weren't alerted: found while you were paused, over your daily limit, waiting for your digest, or found before you chose the topic. Muted topics are left out. Each story still comes once: a pulled story is never alerted later, and tapping again only brings new ones. Pulled stories don't count toward the daily limit. If one fails to send, the next tap tries it again.
 
 Topic choices are only used to pick alerts. They aren't used to guess anyone's views or for anything else.
 

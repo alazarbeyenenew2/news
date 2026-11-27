@@ -99,7 +99,8 @@ def test_new_user_onboarding(chat):
     api = chat.tap("ob:instant")
     done = api.last("sendMessage")
     assert "You're all set" in done["text"] and "Cybersecurity" in done["text"]
-    assert done["reply_markup"]["keyboard"][0][0]["text"] == texts_en.BTN_TOPICS
+    assert done["reply_markup"]["keyboard"][0][0]["text"] == texts_en.BTN_PULL
+    assert done["reply_markup"]["keyboard"][1][0]["text"] == texts_en.BTN_TOPICS
     user = db.get_user(USER)
     assert user.onboarding_completed and user.delivery_mode == "instant" and user.language == "en"
     assert set(db.interests(USER)) == {cid("cybersecurity"), cid("sports")}
@@ -151,10 +152,10 @@ def test_pause_and_resume(chat):
     onboard(chat)
     api = chat.send("/pause")
     assert not db.get_user(USER).notifications_enabled
-    assert api.last("sendMessage")["reply_markup"]["keyboard"][1][0]["text"] == texts_en.BTN_RESUME
+    assert api.last("sendMessage")["reply_markup"]["keyboard"][2][0]["text"] == texts_en.BTN_RESUME
     api = chat.send(texts_en.BTN_RESUME)
     assert db.get_user(USER).notifications_enabled
-    assert api.last("sendMessage")["reply_markup"]["keyboard"][1][0]["text"] == texts_en.BTN_PAUSE
+    assert api.last("sendMessage")["reply_markup"]["keyboard"][2][0]["text"] == texts_en.BTN_PAUSE
 
 
 def test_settings_digest_limit_language_mute(chat):
@@ -229,3 +230,105 @@ def test_blocking_the_bot_is_recorded(chat):
     assert db.get_user(USER).status == "blocked"
     chat.send("/start")  # writing to the bot again means they unblocked it
     assert db.get_user(USER).status == "active"
+
+
+# ---------- 📥 Latest news ----------
+def _stories(provider_key: str, prefix: str, titles: list[str], minutes_ago: int = 5):
+    from datetime import timedelta
+
+    from collector import Collector
+    from db import now_utc
+    from news import RawArticle
+    provider = next(p for p in db.providers() if p.key == provider_key)
+    items = [RawArticle(f"{prefix}-{i}", t, "", f"https://example.com/{prefix}/{i}",
+                        published_at=now_utc() - timedelta(minutes=minutes_ago + i)) for i, t in enumerate(titles)]
+    return Collector().process(db.get_provider(provider.id), items, now_utc())
+
+
+def _alerts(api) -> list[str]:
+    return [p.get("text") or p.get("caption") for m, p in api.calls if m in ("sendMessage", "sendPhoto")
+            and "Read full article" in str(p.get("reply_markup"))]
+
+
+def _statuses() -> dict[str, str]:
+    return {r["title"]: r["status"] for r in db.execute(
+        "SELECT a.title, n.status FROM notifications n JOIN articles a ON a.id = n.article_id WHERE n.user_id = %s",
+        (USER,))}
+
+
+SPORTS = ["Arsenal win the north London derby", "Marathon record falls in Berlin race",
+          "Tennis star reaches Wimbledon final", "NBA finals open with overtime thriller",
+          "Rugby World Cup squad named by coach", "Cricket test ends in dramatic draw",
+          "Formula 1 title race goes to final round"]
+
+
+def test_pull_latest_news_pages_and_never_repeats(chat):
+    onboard(chat, topics=("sports",))
+    _stories("bbc_sport", "s", SPORTS)  # first fetch of the feed: stored as backlog, not alerted
+    _stories("thehackernews", "c", ["Ransomware gang hits hospital network"])  # not their topic
+    assert _statuses() == {}
+
+    api = chat.send(texts_en.BTN_PULL)
+    shown = _alerts(api)
+    assert len(shown) == 5 and SPORTS[0] in shown[0]  # newest first
+    assert not any("Ransomware" in t for t in shown)
+    summary = api.last("sendMessage")
+    assert "2 more waiting" in summary["text"]
+    assert summary["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "pull:more"
+
+    api = chat.tap("pull:more")
+    assert len(_alerts(api)) == 2 and "That's everything" in api.last("sendMessage")["text"]
+    assert set(_statuses().values()) == {"pulled"} and len(_statuses()) == 7
+
+    api = chat.send("/latest")  # nothing new: nothing repeated
+    assert _alerts(api) == [] and "up to date" in api.last("sendMessage")["text"]
+
+
+def test_pull_skips_stories_already_received_and_takes_over_waiting_ones(chat):
+    from bot import pull_news  # noqa: F401  (handler is registered; imported for clarity)
+    from db import now_utc
+    onboard(chat, topics=("sports",))
+    sport = next(p for p in db.providers() if p.key == "bbc_sport")
+    db.record_fetch(sport.id, ok=True, error=None, next_fetch_at=now_utc())  # not a first fetch: alerts queue
+    _stories("bbc_sport", "s", SPORTS[:2])
+    first, second = SPORTS[0], SPORTS[1]
+    assert _statuses() == {first: "queued", second: "queued"}
+    db.execute("UPDATE notifications n SET status = 'sent' FROM articles a WHERE a.id = n.article_id AND a.title = %s",
+               (first,))
+
+    api = chat.send(texts_en.BTN_PULL)
+    shown = _alerts(api)
+    assert len(shown) == 1 and second in shown[0]  # the one already sent isn't repeated
+    assert _statuses() == {first: "sent", second: "pulled"}
+    assert db.due_notifications() == []  # the waiting alert won't be sent a second time
+
+
+def test_pull_only_today_and_only_followed_unmuted_topics(chat):
+    onboard(chat, topics=("sports", "cybersecurity"))
+    _stories("bbc_sport", "old", ["Old match report from two days ago"], minutes_ago=60 * 48)
+    _stories("thehackernews", "c", ["Ransomware gang hits hospital network"])
+    db.set_interest_enabled(USER, cid("cybersecurity"), False)  # muted
+    api = chat.send(texts_en.BTN_PULL)
+    assert _alerts(api) == [] and "up to date" in api.last("sendMessage")["text"]
+    db.set_interest_enabled(USER, cid("cybersecurity"), True)
+    assert len(_alerts(chat.send(texts_en.BTN_PULL))) == 1
+
+
+def test_pull_works_while_paused_and_needs_topics(chat):
+    onboard(chat, topics=("sports",))
+    _stories("bbc_sport", "s", SPORTS[:1])
+    chat.send("/pause")
+    assert len(_alerts(chat.send(texts_en.BTN_PULL))) == 1
+    db.set_interests(USER, set())
+    assert "Choose your topics first" in chat.send("/latest").last("sendMessage")["text"]
+
+
+def test_failed_pull_can_be_tried_again(chat):
+    from telegram.error import BadRequest
+    onboard(chat, topics=("sports",))
+    _stories("bbc_sport", "s", SPORTS[:1])
+    chat.api.fail.append(("sendMessage", BadRequest("Chat not found")))
+    chat.send(texts_en.BTN_PULL)
+    assert _statuses() == {SPORTS[0]: "failed"}
+    assert len(_alerts(chat.send(texts_en.BTN_PULL))) == 1
+    assert _statuses() == {SPORTS[0]: "pulled"}

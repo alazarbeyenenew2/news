@@ -169,22 +169,28 @@ class Sender:
         return "sent"
 
     async def _send(self, user: User, article: Article, provider_name: str, category: Category | None) -> int:
-        if article.image_url:
-            caption, markup = format_alert(article, provider_name, category, user.language, CAPTION_LIMIT)
-            try:
-                message = await self.bot.send_photo(user.chat_id, article.image_url, caption=caption,
-                                                    parse_mode=ParseMode.HTML, reply_markup=markup)
-                return message.message_id
-            except BadRequest as e:
-                if not _is_photo_problem(e):
-                    raise
-                # Telegram couldn't use the image (gone, too big, not an image): send text instead.
-                metrics.inc("image_fallbacks")
-                log.info("Image for article %s not usable (%s); sending text", article.id, e)
-        text, markup = format_alert(article, provider_name, category, user.language, TEXT_LIMIT)
-        message = await self.bot.send_message(user.chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup,
-                                              disable_web_page_preview=True)
-        return message.message_id
+        return await send_alert(self.bot, user, article, provider_name, category)
+
+
+async def send_alert(bot, user: User, article: Article, provider_name: str, category: Category | None) -> int:
+    """Send one alert: a photo with a caption when the feed gave an image Telegram can use, otherwise text.
+    Returns the Telegram message id. Used by the Sender and by the 📥 Latest news button."""
+    if article.image_url:
+        caption, markup = format_alert(article, provider_name, category, user.language, CAPTION_LIMIT)
+        try:
+            message = await bot.send_photo(user.chat_id, article.image_url, caption=caption,
+                                           parse_mode=ParseMode.HTML, reply_markup=markup)
+            return message.message_id
+        except BadRequest as e:
+            if not _is_photo_problem(e):
+                raise
+            # Telegram couldn't use the image (gone, too big, not an image): send text instead.
+            metrics.inc("image_fallbacks")
+            log.info("Image for article %s not usable (%s); sending text", article.id, e)
+    text, markup = format_alert(article, provider_name, category, user.language, TEXT_LIMIT)
+    message = await bot.send_message(user.chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup,
+                                     disable_web_page_preview=True)
+    return message.message_id
 
 
 class Digester:

@@ -618,6 +618,61 @@ class Database:
             queued += cur.rowcount if status != "skipped" else 0
         return queued
 
+    # ---------- pulling today's news on demand ----------
+    def pull_candidates(self, user: User, since: str, limit: int) -> tuple[list[tuple[Article, int]], int]:
+        """Stories from `since` (start of today) for the user's topics (confident, not muted, topic on) in
+        their news language that they haven't received yet, newest first: one article per story.
+        Unlike alerts, this includes stories found while they were paused, over their daily limit, held
+        for their digest, or found before they chose the topic. Returns ([(article, category_id)], total)."""
+        rows = self.execute(
+            """
+            WITH eligible AS (
+                SELECT DISTINCT ON (COALESCE(a.story_cluster_id, a.id))
+                       a.*, ac.category_id AS pull_category_id
+                FROM articles a
+                JOIN article_categories ac ON ac.article_id = a.id AND ac.confidence >= %(threshold)s
+                JOIN categories c ON c.id = ac.category_id AND c.is_active
+                JOIN user_interests i ON i.category_id = ac.category_id AND i.user_id = %(user)s AND i.is_enabled
+                WHERE COALESCE(a.published_at, a.fetched_at) >= %(since)s
+                  AND (%(language)s = 'any' OR a.language = %(language)s)
+                  AND NOT EXISTS (SELECT 1 FROM notifications n
+                                  WHERE n.user_id = %(user)s AND n.status IN ('sent', 'pulled')
+                                    AND n.cluster_id = COALESCE(a.story_cluster_id, a.id))
+                ORDER BY COALESCE(a.story_cluster_id, a.id), ac.confidence DESC, a.id DESC
+            )
+            SELECT *, COUNT(*) OVER () AS total FROM eligible
+            ORDER BY COALESCE(published_at, fetched_at) DESC, id DESC LIMIT %(limit)s
+            """,
+            {"threshold": config.CLASSIFY_MIN_CONFIDENCE, "user": user.telegram_id, "since": since,
+             "language": user.news_language, "limit": limit}).fetchall()
+        total = rows[0]["total"] if rows else 0
+        return [(_row(Article, r), r["pull_category_id"]) for r in rows], total
+
+    def claim_pulled(self, user_id: int, article: Article, category_id: int | None) -> bool:
+        """Record that the user is getting this story now, before it's sent, so a second tap (or the
+        sender) can't send it again. A waiting, held, skipped or failed alert for the story becomes the
+        pulled one. Returns False if they already have it."""
+        now = _now()
+        with self.transaction():
+            cur = self.execute(
+                """INSERT INTO notifications (user_id, article_id, cluster_id, category_id, status,
+                       next_attempt_at, sent_at, created_at, updated_at)
+                   VALUES (%s, %s, %s, %s, 'pulled', %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                (user_id, article.id, article.cluster_id, category_id, now, now, now, now))
+            if cur.rowcount:
+                return True
+            cur = self.execute(
+                """UPDATE notifications SET status = 'pulled', sent_at = %s, last_error = NULL, updated_at = %s
+                   WHERE user_id = %s AND cluster_id = %s AND status NOT IN ('sent', 'pulled')""",
+                (now, now, user_id, article.cluster_id))
+            return cur.rowcount > 0
+
+    def unclaim_pulled(self, user_id: int, article: Article, error: str) -> None:
+        """Sending a pulled story failed: mark it failed so the next tap can try again."""
+        self.execute("UPDATE notifications SET status = 'failed', last_error = %s, updated_at = %s"
+                     " WHERE user_id = %s AND cluster_id = %s AND status = 'pulled'",
+                     (error[:500], _now(), user_id, article.cluster_id))
+
     # ---------- notifications ----------
     def due_notifications(self, limit: int = 30) -> list[Notification]:
         rows = self.execute(
@@ -713,6 +768,8 @@ class Database:
             "queue_oldest": one("SELECT MIN(next_attempt_at) FROM notifications WHERE status = 'queued'"),
             "held_for_digest": one("SELECT COUNT(*) FROM notifications WHERE status = 'digest'"),
             "sent_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'sent' AND sent_at >= %s", (since,)),
+            "pulled_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'pulled' AND sent_at >= %s",
+                                (since,)),
             "failed_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'failed' AND updated_at >= %s",
                                 (since,)),
             "skipped_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'skipped' AND updated_at >= %s",

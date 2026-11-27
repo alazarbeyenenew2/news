@@ -34,8 +34,9 @@ from telegram.ext import (
 import backup
 import config
 import texts
-from db import User, db, now_utc, parse_iso, to_local
-from delivery import MUTE_FROM_ALERT
+import metrics
+from db import User, day_start_utc, db, local_today, now_utc, parse_iso, to_local
+from delivery import MUTE_FROM_ALERT, send_alert
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +52,9 @@ SETTINGS = "st:"         # st:<screen or action>[:<value>]
 DIGEST = "dg:"           # dg:<instant|digest> | dg:h:<hour>
 ADMIN = "ad:"            # ad:<action>[:<id>][:<page>]
 BACKUP = "bk:"           # bk:now | bk:on | bk:off
+PULL_MORE = "pull:more"  # the "more" button under a 📥 Latest news batch
 NOOP = "noop"
+PULL_PAGE = 5  # stories per 📥 Latest news tap
 
 DIGEST_HOURS = (6, 7, 8, 9, 12, 13, 18, 20, 21)
 DAILY_LIMITS = (10, 20, 30, 50, 100, 0)
@@ -73,7 +76,8 @@ def _pairs(buttons: list, size: int = 2) -> list[list]:
 
 def _commands(user: User) -> list[BotCommand]:
     L = tr(user)
-    commands = [BotCommand("start", L.CMD_START), BotCommand("interests", L.CMD_INTERESTS),
+    commands = [BotCommand("start", L.CMD_START), BotCommand("latest", L.CMD_LATEST),
+                BotCommand("interests", L.CMD_INTERESTS),
                 BotCommand("settings", L.CMD_SETTINGS), BotCommand("digest", L.CMD_DIGEST),
                 BotCommand("pause", L.CMD_PAUSE), BotCommand("resume", L.CMD_RESUME),
                 BotCommand("sources", L.CMD_SOURCES), BotCommand("language", L.CMD_LANGUAGE),
@@ -87,7 +91,8 @@ def _commands(user: User) -> list[BotCommand]:
 
 def main_keyboard(user: User) -> ReplyKeyboardMarkup:
     L = tr(user)
-    rows = [[KeyboardButton(L.BTN_TOPICS), KeyboardButton(L.BTN_SETTINGS)],
+    rows = [[KeyboardButton(L.BTN_PULL)],
+            [KeyboardButton(L.BTN_TOPICS), KeyboardButton(L.BTN_SETTINGS)],
             [KeyboardButton(L.BTN_PAUSE if user.notifications_enabled else L.BTN_RESUME),
              KeyboardButton(L.BTN_DIGEST)],
             [KeyboardButton(L.BTN_SOURCES), KeyboardButton(L.BTN_HELP)]]
@@ -568,6 +573,56 @@ async def mute_from_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     log.info("User %s muted %s from an alert", user.telegram_id, category.key)
 
 
+# ---------- 📥 latest news on demand ----------
+async def pull_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """📥 Latest news, /latest, or the "more" button: today's stories for the user's topics that they
+    haven't received yet, PULL_PAGE at a time, newest first. Works while alerts are paused too."""
+    user = await _active_user(update, context)
+    if not user:
+        return
+    L = tr(user)
+    chat_id = update.effective_chat.id
+    query = update.callback_query
+    if query:
+        await query.answer()
+        try:
+            await query.edit_message_reply_markup(None)  # the old "more" button can't be pressed twice
+        except TelegramError:
+            pass
+    if not any(db.interests(user.telegram_id).values()):
+        await _send(context, chat_id, L.PULL_NO_TOPICS, main_keyboard(user))
+        return
+    if context.user_data.get("pulling"):
+        return  # a pull for this user is already sending
+    context.user_data["pulling"] = True
+    try:
+        items, total = db.pull_candidates(user, day_start_utc(local_today()), PULL_PAGE)
+        if not items:
+            await _send(context, chat_id, L.PULL_NOTHING, main_keyboard(user))
+            return
+        providers = {p.id: p.name for p in db.providers()}
+        categories = {c.id: c for c in db.categories()}
+        sent = 0
+        for article, category_id in items:
+            if not db.claim_pulled(user.telegram_id, article, category_id):
+                continue  # already received meanwhile
+            try:
+                await _retry(lambda: send_alert(context.bot, user, article, providers.get(article.provider_id, ""),
+                                                categories.get(category_id)))
+                sent += 1
+            except TelegramError as e:
+                db.unclaim_pulled(user.telegram_id, article, str(e))
+                log.warning("Pulled article %s to %s failed: %s", article.id, user.telegram_id, e)
+            await asyncio.sleep(0.3)  # keep a short burst gentle
+        metrics.inc("news_pulled", sent)
+        log.info("User %s pulled %s stories (%s more waiting)", user.telegram_id, sent, total - len(items))
+        remaining = total - len(items)
+        more = InlineKeyboardMarkup([[_button(L.pull_more(remaining), PULL_MORE)]]) if remaining else None
+        await _send(context, chat_id, L.pull_done(sent, remaining), more or main_keyboard(user))
+    finally:
+        context.user_data.pop("pulling", None)
+
+
 # ---------- sources / help ----------
 async def sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = await _active_user(update, context)
@@ -868,7 +923,7 @@ def build_application(request=None) -> Application:
     app = builder.build()
     private = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
 
-    for command, handler in [("start", start), ("interests", interests), ("topics", interests),
+    for command, handler in [("start", start), ("latest", pull_news), ("interests", interests), ("topics", interests),
                              ("settings", settings), ("digest", digest), ("pause", pause), ("resume", resume),
                              ("sources", sources), ("language", choose_language), ("help", help_command),
                              ("admin", admin), ("backup", backup_menu)]:
@@ -877,7 +932,7 @@ def build_application(request=None) -> Application:
     # Reply keyboard buttons, in every language.
     for name, handler in [("BTN_TOPICS", interests), ("BTN_SETTINGS", settings), ("BTN_PAUSE", pause),
                           ("BTN_RESUME", resume), ("BTN_DIGEST", digest), ("BTN_SOURCES", sources),
-                          ("BTN_HELP", help_command), ("BTN_ADMIN", admin)]:
+                          ("BTN_HELP", help_command), ("BTN_ADMIN", admin), ("BTN_PULL", pull_news)]:
         app.add_handler(MessageHandler(private & filters.Text(texts.labels(name)), handler))
     app.add_handler(MessageHandler(private & filters.Text([texts.LANGUAGE_BUTTON]), choose_language))
 
@@ -891,6 +946,7 @@ def build_application(request=None) -> Application:
     app.add_handler(CallbackQueryHandler(mute_from_alert, pattern=rf"^{MUTE_FROM_ALERT}\d+$"))
     app.add_handler(CallbackQueryHandler(admin_action, pattern=rf"^{ADMIN}[a-z]+(:\d+){{0,2}}$"))
     app.add_handler(CallbackQueryHandler(backup_action, pattern=rf"^{BACKUP}(now|on|off)$"))
+    app.add_handler(CallbackQueryHandler(pull_news, pattern=f"^{PULL_MORE}$"))
     app.add_handler(CallbackQueryHandler(noop, pattern=f"^{NOOP}$"))
     app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(MessageHandler(private & ~filters.COMMAND, unknown))

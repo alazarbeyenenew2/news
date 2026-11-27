@@ -206,6 +206,7 @@ HELP = (f"❓ <b>How {BOT} works</b>\n{LINE}\n"
         "your topics, you get an alert with the headline, a short description, the source, the time "
         "and a button to read the full article on the provider's site.\n\n"
         "<b>Commands</b>\n"
+        "/latest — today's stories you haven't seen yet (📥 Latest news)\n"
         "/interests — choose your topics\n"
         "/settings — alerts, digest, daily limit, news language, delete your data\n"
         "/digest — instant alerts or one daily digest\n"
@@ -231,7 +232,7 @@ def admin_status(s: dict, web_hint: bool) -> str:
             f"📰 Articles today: <b>{s['articles_today']}</b> · same story elsewhere {s['duplicates_today']}"
             f" · waiting for review {s['low_confidence_today']}\n"
             f"📬 Queue: <b>{s['queued']}</b> (oldest {oldest}) · held for digests {s['held_for_digest']}\n"
-            f"✅ Sent today: <b>{s['sent_today']}</b> · ❌ failed {s['failed_today']} · skipped {s['skipped_today']}")
+            f"✅ Sent today: <b>{s['sent_today']}</b> · 📥 pulled {s.get('pulled_today', 0)} · ❌ failed {s['failed_today']} · skipped {s['skipped_today']}")
     if web_hint:
         text += "\n\n<i>More (article categories, keywords, users) on the web admin page.</i>"
     return text
@@ -292,3 +293,18 @@ def backup_caption(when: str, users: int, articles: int, nightly: bool) -> str:
 
 BACKUP_TOO_BIG = "⚠️ The backup is over Telegram's 50 MB limit. Copy it from the server instead."
 BACKUP_WORKING = "💾 Making a backup…"
+
+# ---------- 📥 latest news ----------
+BTN_PULL = "📥 Latest news"
+CMD_LATEST = "Today's news you haven't seen yet"
+PULL_NO_TOPICS = "🗞 Choose your topics first: tap <b>🗞 My topics</b>."
+PULL_NOTHING = "✅ <b>You're up to date.</b>\nNo new stories today for your topics. New ones will arrive here."
+
+
+def pull_done(sent: int, remaining: int) -> str:
+    text = f"📥 {sent} {'story' if sent == 1 else 'stories'} from today."
+    return text + (f"\n{remaining} more waiting." if remaining else "\n✅ That's everything for today so far.")
+
+
+def pull_more(remaining: int) -> str:
+    return f"📥 Show more ({remaining})"

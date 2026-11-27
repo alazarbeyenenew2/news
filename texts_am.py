@@ -205,6 +205,7 @@ HELP = (f"❓ <b>{BOT} እንዴት ይሠራል</b>\n{LINE}\n"
         "የዜና ምንጮችን ይፋዊ መጋቢዎች በየጥቂት ደቂቃው እንፈትሻለን። አዲስ ዜና ከርዕሶችዎ ጋር ሲገናኝ "
         "ርዕሱ፣ አጭር መግለጫ፣ ምንጩ፣ ሰዓቱ እና ሙሉውን በምንጩ ድረ-ገጽ ለማንበብ ቁልፍ ያለው ማሳወቂያ ይደርስዎታል።\n\n"
         "<b>ትዕዛዞች</b>\n"
+        "/latest — ያላዩዋቸው የዛሬ ዜናዎች (📥 የቅርብ ዜናዎች)\n"
         "/interests — ርዕሶችዎን ይምረጡ\n"
         "/settings — ማሳወቂያ፣ ማጠቃለያ፣ የቀን ገደብ፣ የዜና ቋንቋ፣ መረጃ መሰረዝ\n"
         "/digest — ፈጣን ማሳወቂያ ወይስ ዕለታዊ ማጠቃለያ\n"
@@ -231,7 +232,7 @@ def admin_status(s: dict, web_hint: bool) -> str:
             f"📰 የዛሬ ዜናዎች፦ <b>{s['articles_today']}</b> · በሌላ ምንጭ የተደገሙ {s['duplicates_today']}"
             f" · ግምገማ የሚጠብቁ {s['low_confidence_today']}\n"
             f"📬 ወረፋ፦ <b>{s['queued']}</b> (የቆየው {oldest}) · ለማጠቃለያ የተያዙ {s['held_for_digest']}\n"
-            f"✅ ዛሬ የተላኩ፦ <b>{s['sent_today']}</b> · ❌ ያልተሳኩ {s['failed_today']} · የተዘለሉ {s['skipped_today']}")
+            f"✅ ዛሬ የተላኩ፦ <b>{s['sent_today']}</b> · 📥 የተጠየቁ {s.get('pulled_today', 0)} · ❌ ያልተሳኩ {s['failed_today']} · የተዘለሉ {s['skipped_today']}")
     if web_hint:
         text += "\n\n<i>ተጨማሪ (የዜና ምድቦች፣ ቁልፍ ቃላት፣ ተጠቃሚዎች) በድረ-ገጹ የአስተዳደር ገጽ ላይ።</i>"
     return text
@@ -292,3 +293,18 @@ def backup_caption(when: str, users: int, articles: int, nightly: bool) -> str:
 
 BACKUP_TOO_BIG = "⚠️ ምትኬው ከቴሌግራም 50 MB ገደብ በላይ ነው። ከአገልጋዩ ይቅዱት።"
 BACKUP_WORKING = "💾 ምትኬ እየተዘጋጀ ነው…"
+
+# ---------- 📥 latest news ----------
+BTN_PULL = "📥 የቅርብ ዜናዎች"
+CMD_LATEST = "ያላዩዋቸው የዛሬ ዜናዎች"
+PULL_NO_TOPICS = "🗞 መጀመሪያ ርዕሶችዎን ይምረጡ፦ <b>🗞 የኔ ርዕሶች</b>ን ይንኩ።"
+PULL_NOTHING = "✅ <b>ሁሉንም አይተዋል።</b>\nለርዕሶችዎ ዛሬ አዲስ ዜና የለም። አዳዲሶች እዚህ ይደርሳሉ።"
+
+
+def pull_done(sent: int, remaining: int) -> str:
+    text = f"📥 ከዛሬ {sent} ዜናዎች።"
+    return text + (f"\nሌሎች {remaining} ይጠብቃሉ።" if remaining else "\n✅ እስካሁን ያሉት የዛሬ ዜናዎች እነዚህ ናቸው።")
+
+
+def pull_more(remaining: int) -> str:
+    return f"📥 ተጨማሪ አሳይ ({remaining})"
