@@ -96,7 +96,9 @@ docker run -d --name news-pg -p 127.0.0.1:5432:5432 -e POSTGRES_USER=newsbot -e 
 .venv/bin/python main.py
 ```
 
-(Or run everything with `docker compose up -d --build`, which starts PostgreSQL too.) The bot waits for the database, creates the tables (`migrations/`) and fills in the topics and providers on first start.
+(Or run everything with `docker compose up -d --build`, which starts PostgreSQL too.)
+
+**Migrations run at every start.** Before anything else, the bot waits for the database and runs each `migrations/NNN_name.sql` it hasn't run yet, in order, recording it in `schema_migrations`; the log says `Database schema up to date (version …)` or which ones it applied. Pending migrations run in one transaction, so a failing one changes nothing and the bot doesn't start (fix it and deploy again). To change the tables, add a new numbered file (e.g. `002_add_quiet_hours.sql`); never edit one that has been deployed. `python db.py` runs the migrations without starting the bot. Then the topics and providers new in `seed/` are added.
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and put its token in `BOT_TOKEN`.
 2. Put your Telegram ID in `SUPER_ADMIN_IDS` (from @userinfobot).

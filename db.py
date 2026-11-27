@@ -201,7 +201,6 @@ class Database:
         self.conninfo = conninfo or config.DATABASE
         self._in_transaction = False
         self.conn = self._connect(wait_seconds)
-        self._migrate()
 
     def _connect(self, wait_seconds: int = 0) -> psycopg.Connection:
         """Connect, retrying while the database container starts up."""
@@ -254,19 +253,31 @@ class Database:
         self.conn.close()
 
     # ---------- migrations ----------
-    def _migrate(self) -> None:
+    def migrate(self, migrations_dir: Path = MIGRATIONS_DIR) -> list[str]:
+        """Bring the tables up to date: run every migrations/NNN_name.sql not run before, in order, and
+        record it in schema_migrations. Called first thing at startup. All pending migrations run in one
+        transaction, so a failing one leaves the database exactly as it was (and the bot doesn't start).
+        Several copies starting at once wait for each other. Returns the versions applied."""
+        applied = []
         with self.transaction():
-            # Only one process migrates at a time.
             self.execute("SELECT pg_advisory_xact_lock(4242)")
             self.execute("CREATE TABLE IF NOT EXISTS schema_migrations"
                          " (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL)")
             done = {r["version"] for r in self.execute("SELECT version FROM schema_migrations")}
-            for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            for path in sorted(migrations_dir.glob("*.sql")):
                 if path.stem in done:
                     continue
+                log.info("Applying migration %s", path.stem)
                 self.execute(path.read_text(encoding="utf-8"))
                 self.execute("INSERT INTO schema_migrations VALUES (%s, %s)", (path.stem, _now()))
-                log.info("Applied migration %s", path.stem)
+                applied.append(path.stem)
+        return applied
+
+    def schema_version(self) -> str | None:
+        """The newest migration applied, or None if none has been."""
+        if not self._one("SELECT to_regclass('schema_migrations') IS NOT NULL"):
+            return None
+        return self._one("SELECT MAX(version) FROM schema_migrations")
 
     def ping(self) -> bool:
         return self._one("SELECT 1") == 1
@@ -747,3 +758,9 @@ def load_seed() -> tuple[list[dict], list[dict]]:
 
 
 db = Database()
+
+if __name__ == "__main__":
+    # Migrate without starting the bot: python db.py
+    logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
+    done = db.migrate()
+    print(f"Applied {', '.join(done)}." if done else "Nothing to apply.", "Schema version:", db.schema_version())

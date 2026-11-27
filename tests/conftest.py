@@ -33,6 +33,8 @@ from telegram.request import BaseRequest, RequestData  # noqa: E402
 
 from db import db, load_seed  # noqa: E402
 
+db.migrate()  # as main.py does at startup
+
 FIXTURES = Path(__file__).parent / "fixtures"
 TABLES = ["notifications", "article_categories", "articles", "user_interests", "users", "providers",
           "categories", "settings"]

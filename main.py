@@ -7,20 +7,27 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
-import config
-from bot import build_application, nightly_backup_loop
-from collector import Collector
-from db import db, load_seed
-from delivery import Digester, Sender
-from web import create_web_app
-
+# Logging first: importing db connects to the database and logs while it waits for it.
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+import config  # noqa: E402
+from bot import build_application, nightly_backup_loop  # noqa: E402
+from collector import Collector  # noqa: E402
+from db import db, load_seed  # noqa: E402
+from delivery import Digester, Sender  # noqa: E402
+from web import create_web_app  # noqa: E402
+
 log = logging.getLogger("main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. Tables: apply any new migrations before anything touches the database.
+    applied = db.migrate()
+    log.info("Database schema %s (version %s)", f"migrated: applied {', '.join(applied)}" if applied
+             else "up to date", db.schema_version())
+    # 2. Topics and providers new in seed/ (existing ones are left as the admins set them).
     added_categories, added_providers = db.seed(*load_seed())
     if added_categories or added_providers:
         log.info("Seeded %s topics and %s providers", added_categories, added_providers)
