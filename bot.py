@@ -37,8 +37,7 @@ import texts
 import metrics
 from db import User, day_start_utc, db, local_today, now_utc, parse_iso, to_local
 from delivery import MUTE_FROM_ALERT, send_alert
-from keyboards import PAD, align
-from keyboards import width as _width  # noqa: F401  (used by tests)
+from keyboards import grid
 
 log = logging.getLogger(__name__)
 
@@ -78,13 +77,10 @@ def _button(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text, callback_data=data)
 
 
-def _column(items: list[tuple[str, str]]) -> list[list[InlineKeyboardButton]]:
-    """One button per row. (Every keyboard is lined up on the left by keyboards.align when it's sent.)"""
-    return [[_button(label, data)] for label, data in items]
-
-
-def _pairs(buttons: list, size: int = 2) -> list[list]:
-    return [buttons[i:i + size] for i in range(0, len(buttons), size)]
+def _grid(items: list[tuple[str, str]], checkboxes: bool = False) -> list[list[InlineKeyboardButton]]:
+    """(label, callback data) pairs as a grid: 3 per row when short, 2 when medium, 1 when long
+    (see keyboards.grid). checkboxes: a ✅/⬜ list, where labels too long to share a row go last."""
+    return grid([_button(label, data) for label, data in items], wide_last=checkboxes)
 
 
 def _commands(user: User) -> list[BotCommand]:
@@ -134,18 +130,18 @@ async def _show(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str,
     query = update.callback_query
     if query:
         try:
-            await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=align(keyboard),
+            await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard,
                                           disable_web_page_preview=True)
             return
         except TelegramError as e:
             if "not modified" in str(e).lower():
                 return
     await context.bot.send_message(update.effective_chat.id, text, parse_mode=ParseMode.HTML,
-                                   reply_markup=align(keyboard), disable_web_page_preview=True)
+                                   reply_markup=keyboard, disable_web_page_preview=True)
 
 
 async def _send(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, reply_markup=None) -> None:
-    await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=align(reply_markup),
+    await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=reply_markup,
                                    disable_web_page_preview=True)
 
 
@@ -237,8 +233,8 @@ def _topic_picker(user: User, mode: str, draft: set[int], first_name: str | None
     categories = db.categories()
     text = (L.welcome(html.escape(first_name or "")) if mode == "o" else "") + L.TOPICS_PROMPT
     text += L.topics_selected(len(draft & {c.id for c in categories}))
-    rows = _column([(("✅ " if c.id in draft else "⬜ ") + c.label(user.language), f"{TOPIC}{mode}:{c.id}")
-                    for c in categories])
+    rows = _grid([(("✅ " if c.id in draft else "⬜ ") + c.label(user.language), f"{TOPIC}{mode}:{c.id}")
+                    for c in categories], checkboxes=True)
     rows.append([_button(L.TOPIC_ALL, f"{TOPIC_ALL}{mode}"), _button(L.TOPIC_NONE, f"{TOPIC_NONE}{mode}")])
     rows.append([_button(L.TOPIC_SAVE, f"{TOPIC_SAVE}{mode}"),
                  _button(L.TOPIC_SKIP if mode == "o" else L.TOPIC_CANCEL, f"{TOPIC_SKIP}{mode}")])
@@ -320,7 +316,7 @@ async def topic_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def _show_delivery_step(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
     L = tr(user)
-    keyboard = InlineKeyboardMarkup(_column([(L.DELIVERY_INSTANT, f"{ONBOARD_DELIVERY}instant"),
+    keyboard = InlineKeyboardMarkup(_grid([(L.DELIVERY_INSTANT, f"{ONBOARD_DELIVERY}instant"),
                                              (L.DELIVERY_DIGEST, f"{ONBOARD_DELIVERY}digest")]))
     await _show(update, context, L.DELIVERY_PROMPT, keyboard)
 
@@ -362,9 +358,8 @@ async def _show_sources(update: Update, context: ContextTypes.DEFAULT_TYPE, user
         await _send(context, update.effective_chat.id, L.SOURCES_EMPTY, main_keyboard(user))
         return
     off = _sources_off(context, user, groups, fresh)
-    rows = _column([(("⬜ " if g["id"] in off else "✅ ") + g["name"]
-                     + (" · " + "".join(c.emoji for c in g["topics"]) if g["topics"] else ""),
-                     f"{SOURCE}{mode}:{g['id']}") for g in groups])
+    rows = _grid([(("⬜ " if g["id"] in off else "✅ ") + g["name"], f"{SOURCE}{mode}:{g['id']}")
+                   for g in groups], checkboxes=True)
     rows.append([_button(L.TOPIC_ALL, f"{SOURCE_ALL}{mode}"), _button(L.TOPIC_NONE, f"{SOURCE_NONE}{mode}")])
     rows.append([_button(L.SOURCES_NEXT if mode == "o" else L.TOPIC_SAVE, f"{SOURCE_SAVE}{mode}"),
                  _button(L.SOURCES_SKIP if mode == "o" else L.TOPIC_CANCEL, f"{SOURCE_SKIP}{mode}")])
@@ -523,7 +518,7 @@ def _settings_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
         L.NEWS_LANGUAGES.get(user.news_language, user.news_language),
         len(interests_), sum(1 for on in interests_.values() if not on),
     )
-    rows = _column([
+    rows = _grid([
         (L.SET_PAUSE if user.notifications_enabled else L.SET_RESUME,
          f"{SETTINGS}{'pause' if user.notifications_enabled else 'resume'}"),
         (L.SET_TO_DIGEST if instant else L.SET_TO_INSTANT, f"{SETTINGS}mode:{'digest' if instant else 'instant'}"),
@@ -591,8 +586,8 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer(L.digest_at(user.digest_hour))
         else:
             await query.answer()
-            rows = _pairs([_button(_mark(h == user.digest_hour, f"{h:02d}:00"), f"{SETTINGS}hour:{h}")
-                           for h in DIGEST_HOURS], 3)
+            rows = _grid([(_mark(h == user.digest_hour, f"{h:02d}:00"), f"{SETTINGS}hour:{h}")
+                          for h in DIGEST_HOURS])
             await _show(update, context, L.HOUR_PROMPT, InlineKeyboardMarkup(rows + [back]))
             return
     elif action == "limit":
@@ -601,8 +596,8 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer(L.limit_text(user.max_per_day))
         else:
             await query.answer()
-            rows = _pairs([_button(_mark(n == user.max_per_day, L.limit_text(n)), f"{SETTINGS}limit:{n}")
-                           for n in DAILY_LIMITS], 2)
+            rows = _grid([(_mark(n == user.max_per_day, L.limit_text(n)), f"{SETTINGS}limit:{n}")
+                          for n in DAILY_LIMITS])
             await _show(update, context, L.LIMIT_PROMPT, InlineKeyboardMarkup(rows + [back]))
             return
     elif action == "nl":
@@ -611,7 +606,7 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer(L.NEWS_LANGUAGES[value])
         else:
             await query.answer()
-            rows = _column([(("✅ " if code == user.news_language else "⬜ ") + label, f"{SETTINGS}nl:{code}")
+            rows = _grid([(("✅ " if code == user.news_language else "⬜ ") + label, f"{SETTINGS}nl:{code}")
                             for code, label in L.NEWS_LANGUAGES.items()])
             await _show(update, context, L.NEWS_LANGUAGE_PROMPT, InlineKeyboardMarkup(rows + [back]))
             return
@@ -654,8 +649,8 @@ def _mute_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
     interests_ = db.interests(user.telegram_id)
     categories = [c for c in db.categories() if c.id in interests_]
-    rows = _column([(("🔔 " if interests_[c.id] else "🔕 ") + c.label(user.language), f"{SETTINGS}mute:{c.id}")
-                    for c in categories])
+    rows = _grid([(("🔔 " if interests_[c.id] else "🔕 ") + c.label(user.language), f"{SETTINGS}mute:{c.id}")
+                    for c in categories], checkboxes=True)
     rows.append([_button(L.BACK, f"{SETTINGS}menu")])
     return (L.MUTE_PROMPT if categories else L.MUTE_NONE), InlineKeyboardMarkup(rows)
 
@@ -672,11 +667,10 @@ def _set_mode(user: User, mode: str) -> User:
 def _digest_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
     instant = user.delivery_mode == "instant"
-    rows = _column([(_mark(instant, L.DELIVERY_INSTANT), f"{DIGEST}instant"),
+    rows = _grid([(_mark(instant, L.DELIVERY_INSTANT), f"{DIGEST}instant"),
                     (_mark(not instant, L.DELIVERY_DIGEST), f"{DIGEST}digest")])
-    rows += _pairs([_button(("✅ " if not instant and h == user.digest_hour else "") + f"🕗 {h:02d}:00",
-                            f"{DIGEST}h:{h}")
-                    for h in DIGEST_HOURS], 3)
+    rows += _grid([(_mark(not instant and h == user.digest_hour, f"{h:02d}:00"), f"{DIGEST}h:{h}")
+                    for h in DIGEST_HOURS])
     return L.digest_menu(instant, user.digest_hour), InlineKeyboardMarkup(rows)
 
 
@@ -846,7 +840,7 @@ def _admin_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     if stats["queue_oldest"]:
         age = max(0, int((now_utc() - parse_iso(stats["queue_oldest"])).total_seconds()))
         stats["queue_age"] = f"{age // 60} min" if age >= 60 else f"{age} s"
-    rows = _column([(L.ADMIN_PROVIDERS, f"{ADMIN}prov:0"), (L.ADMIN_CATEGORIES, f"{ADMIN}cat"),
+    rows = _grid([(L.ADMIN_PROVIDERS, f"{ADMIN}prov:0"), (L.ADMIN_CATEGORIES, f"{ADMIN}cat"),
                     (f"{L.ADMIN_FAILED} ({stats['failed_today']})", f"{ADMIN}fail"),
                     (L.ADMIN_REFRESH, f"{ADMIN}menu")])
     return L.admin_status(stats, web_hint=True), InlineKeyboardMarkup(rows)
@@ -869,7 +863,7 @@ def _providers_screen(user: User, page: int) -> tuple[str, InlineKeyboardMarkup]
     pages = max(1, -(-len(providers) // PROVIDERS_PER_PAGE))
     page = min(max(page, 0), pages - 1)
     chunk = providers[page * PROVIDERS_PER_PAGE:(page + 1) * PROVIDERS_PER_PAGE]
-    rows = _column([(("✅" if p.is_enabled else "⏸") + ("⚠️" if p.consecutive_failures else PAD * 2)
+    rows = _grid([(("✅" if p.is_enabled else "⏸") + ("⚠️" if p.consecutive_failures else "")
                      + f" {p.name} · {p.key}", f"{ADMIN}pc:{p.id}:{page}") for p in chunk])
     if pages > 1:
         rows.append([_button("◀️", f"{ADMIN}prov:{page - 1}") if page > 0 else _button(" ", NOOP),
@@ -891,7 +885,7 @@ def _provider_card(user: User, provider_id: int, page: int) -> tuple[str, Inline
                            p.polling_interval_seconds, _ago(p.last_success_at, L),
                            html.escape(p.last_error or L.NONE), p.articles_total, topics,
                            html.escape(p.notes or ""))
-    rows = _column([(L.ADMIN_DISABLE if p.is_enabled else L.ADMIN_ENABLE, f"{ADMIN}pt:{p.id}:{page}"),
+    rows = _grid([(L.ADMIN_DISABLE if p.is_enabled else L.ADMIN_ENABLE, f"{ADMIN}pt:{p.id}:{page}"),
                     (L.ADMIN_FETCH_NOW, f"{ADMIN}pf:{p.id}:{page}"),
                     (L.BACK, f"{ADMIN}prov:{page}")])
     return text, InlineKeyboardMarkup(rows)
@@ -899,8 +893,8 @@ def _provider_card(user: User, provider_id: int, page: int) -> tuple[str, Inline
 
 def _categories_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
-    rows = _column([(("✅ " if c.is_active else "⏸ ") + c.label(user.language), f"{ADMIN}ct:{c.id}")
-                    for c in db.categories(active_only=False)])
+    rows = _grid([(("✅ " if c.is_active else "⏸ ") + c.label(user.language), f"{ADMIN}ct:{c.id}")
+                    for c in db.categories(active_only=False)], checkboxes=True)
     rows.append([_button(L.BACK, f"{ADMIN}menu")])
     return L.CATEGORIES_TITLE, InlineKeyboardMarkup(rows)
 

@@ -17,7 +17,7 @@ from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError, Re
 import config
 import metrics
 import texts
-from keyboards import align
+from keyboards import grid
 from db import Article, Category, Notification, User, db, now_utc, to_local
 
 log = logging.getLogger(__name__)
@@ -54,11 +54,11 @@ def format_alert(article: Article, provider_name: str, category: Category | None
     if len(text) > limit:  # a very long headline: shorten it too
         title = f"<b>{html.escape(_truncate(article.title, max(40, limit - len(head) - len(footer) - 20)))}</b>"
         text = head + title + footer
-    rows = [[InlineKeyboardButton(L.READ_FULL, url=article.canonical_url)]]
+    buttons = [InlineKeyboardButton(L.READ_FULL, url=article.canonical_url)]
     if category:
-        rows.append([InlineKeyboardButton(L.mute_button(category.name(language)),
-                                          callback_data=f"{MUTE_FROM_ALERT}{category.id}")])
-    return text, align(InlineKeyboardMarkup(rows))
+        buttons.append(InlineKeyboardButton(L.mute_button(category.name(language)),
+                                            callback_data=f"{MUTE_FROM_ALERT}{category.id}"))
+    return text, InlineKeyboardMarkup(grid(buttons))
 
 
 def _retry_after_seconds(e: RetryAfter) -> float:

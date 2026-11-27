@@ -355,41 +355,43 @@ def test_failed_pull_can_be_tried_again(chat):
     assert _statuses() == {SPORTS[0]: "pulled"}
 
 
-def test_selection_lists_line_up_on_the_left(chat):
-    """Telegram centres button text, so labels are padded to one width: the ✅ / ⬜ marks line up."""
-    from bot import PAD, _width
-    chat.send("/start")
-    for language in ("en", "am"):
-        db.update_user(USER, language=language)
-        api = chat.send("/interests")
-        rows = api.last("sendMessage")["reply_markup"]["inline_keyboard"]
-        topics = [row[0]["text"] for row in rows if len(row) == 1]
-        assert len(topics) == len(db.categories())  # one topic per row
-        assert all(t[0] in "✅⬜" for t in topics)
-        assert len({_width(t) for t in topics}) == 1
-        assert any(t.endswith(PAD) for t in topics) and not any(t.endswith(" ") for t in topics)
-
-
 def _rows(message) -> list[list[str]]:
     return [[b["text"] for b in row] for row in message["reply_markup"]["inline_keyboard"]]
 
 
-def test_every_menu_lines_up(chat):
-    """Settings, digest, sources and admin menus: buttons in rows of the same size share one width."""
-    from bot import _width
+def test_menus_are_checkbox_grids(chat):
+    """Buttons sit 2-3 to a row when their text fits, and every row fits the screen width."""
+    from keyboards import MAX_PER_ROW, fits
     onboard(chat, SUPER)
-    screens = [chat.send("/settings", SUPER).last("sendMessage"), chat.send("/digest", SUPER).last("sendMessage"),
-               chat.send("/sources", SUPER).last("sendMessage"), chat.send("/admin", SUPER).last("sendMessage"),
-               chat.tap("st:limit", SUPER).last("editMessageText")]
-    for message in screens:
-        by_size: dict[int, set] = {}
-        for row in _rows(message):
-            for label in row:
-                if label.strip():
-                    by_size.setdefault(len(row), set()).add(_width(label))
-        assert all(len(widths) == 1 for widths in by_size.values()), (message["text"][:30], by_size)
-    settings_rows = _rows(screens[0])
-    assert all(len(row) == 1 for row in settings_rows)  # one column: long labels never get cut off
+    for language in ("en", "am"):
+        db.update_user(SUPER, language=language)
+        screens = {"topics": chat.send("/interests", SUPER).last("sendMessage"),
+                   "settings": chat.send("/settings", SUPER).last("sendMessage"),
+                   "digest": chat.send("/digest", SUPER).last("sendMessage"),
+                   "sources": chat.send("/sources", SUPER).last("sendMessage"),
+                   "admin": chat.send("/admin", SUPER).last("sendMessage")}
+        for name, message in screens.items():
+            rows = _rows(message)
+            assert all(len(row) <= MAX_PER_ROW and fits(row) for row in rows), (language, name, rows)
+            assert not any("⠀" in label for row in rows for label in row)  # no invisible padding
+        topic_rows = [row for row in _rows(screens["topics"]) if row[0][0] in "✅⬜"
+                      and not row[0].startswith(texts.get(language).TOPIC_NONE)]
+        assert sum(len(row) for row in topic_rows) == len(db.categories())
+        assert sum(1 for row in topic_rows if len(row) >= 2) >= 4  # mostly 2-3 per row
+        assert any(len(row) == 3 for row in _rows(screens["digest"]))  # short labels: 3 per row
+
+
+def test_grid_layout_rules():
+    from telegram import InlineKeyboardButton
+
+    from keyboards import grid
+    b = lambda text: InlineKeyboardButton(text, callback_data="x")  # noqa: E731
+    rows = grid([b("⬜ 06:00"), b("⬜ 07:00"), b("⬜ 08:00"), b("⬜ 09:00")])
+    assert [len(r) for r in rows] == [3, 1]  # short: three to a row
+    rows = grid([b("✅ Cybersecurity"), b("⬜ Technology"), b("⬜ Sports")])
+    assert [len(r) for r in rows] == [2, 1]  # medium: two to a row
+    long = b("⬜ A label much too long to share a row with anything")
+    assert [[x.text for x in r] for r in grid([b("⬜ One"), long, b("⬜ Two")], wide_last=True)][-1] == [long.text]
 
 
 # ---------- 📚 Sources ----------
