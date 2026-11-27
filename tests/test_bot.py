@@ -88,7 +88,8 @@ def test_new_user_onboarding(chat):
 
     chat.tap(f"tp:o:{cid('cybersecurity')}")
     api = chat.tap(f"tp:o:{cid('sports')}")
-    buttons = [b["text"] for row in api.last("editMessageText")["reply_markup"]["inline_keyboard"] for b in row]
+    buttons = [b["text"].rstrip("⠀") for row in api.last("editMessageText")["reply_markup"]["inline_keyboard"]
+               for b in row]
     assert "✅ 🔐 Cybersecurity" in buttons and "✅ ⚽ Sports" in buttons and "⬜ 🏛 Politics" in buttons
     assert "Selected: 2" in api.last("editMessageText")["text"]
 
@@ -332,3 +333,18 @@ def test_failed_pull_can_be_tried_again(chat):
     assert _statuses() == {SPORTS[0]: "failed"}
     assert len(_alerts(chat.send(texts_en.BTN_PULL))) == 1
     assert _statuses() == {SPORTS[0]: "pulled"}
+
+
+def test_selection_lists_line_up_on_the_left(chat):
+    """Telegram centres button text, so labels are padded to one width: the ✅ / ⬜ marks line up."""
+    from bot import PAD, _width
+    chat.send("/start")
+    for language in ("en", "am"):
+        db.update_user(USER, language=language)
+        api = chat.send("/interests")
+        rows = api.last("sendMessage")["reply_markup"]["inline_keyboard"]
+        topics = [row[0]["text"] for row in rows if len(row) == 1]
+        assert len(topics) == len(db.categories())  # one topic per row
+        assert all(t[0] in "✅⬜" for t in topics)
+        assert len({_width(t) for t in topics}) == 1
+        assert any(t.endswith(PAD) for t in topics) and not any(t.endswith(" ") for t in topics)

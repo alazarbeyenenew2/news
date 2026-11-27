@@ -6,6 +6,7 @@ Telegram lives in texts_am.py / texts_en.py; each person sees their own language
 import asyncio
 import html
 import logging
+import unicodedata
 from datetime import datetime
 
 from telegram import (
@@ -68,6 +69,30 @@ def tr(user: User | None):
 
 def _button(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text, callback_data=data)
+
+
+PAD = "⠀"  # Braille blank: invisible, and Telegram doesn't trim it like spaces
+
+
+def _width(text: str) -> int:
+    """Roughly how wide text looks: emoji and wide characters count 2, joiners and accents 0."""
+    width = 0
+    for i, ch in enumerate(text):
+        if unicodedata.category(ch) in ("Mn", "Me", "Cf") or "\ufe00" <= ch <= "\ufe0f":
+            continue
+        if "\U0001f1e6" <= ch <= "\U0001f1ff":  # a flag is two of these, shown as one emoji
+            width += 1
+            continue
+        emoji_style = (i + 1 < len(text) and text[i + 1] == "\ufe0f") or ch >= "\U0001f000"
+        width += 2 if emoji_style or unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
+
+def _column(items: list[tuple[str, str]]) -> list[list[InlineKeyboardButton]]:
+    """One button per row with the text lined up on the left. Telegram centres button text, so every
+    label is padded to the same width with an invisible character (as in the report bot's users list)."""
+    width = max((_width(label) for label, _ in items), default=0)
+    return [[_button(label + PAD * (width - _width(label)), data)] for label, data in items]
 
 
 def _pairs(buttons: list, size: int = 2) -> list[list]:
@@ -224,9 +249,8 @@ def _topic_picker(user: User, mode: str, draft: set[int], first_name: str | None
     categories = db.categories()
     text = (L.welcome(html.escape(first_name or "")) if mode == "o" else "") + L.TOPICS_PROMPT
     text += L.topics_selected(len(draft & {c.id for c in categories}))
-    buttons = [_button(("✅ " if c.id in draft else "⬜ ") + c.label(user.language), f"{TOPIC}{mode}:{c.id}")
-               for c in categories]
-    rows = _pairs(buttons)
+    rows = _column([(("✅ " if c.id in draft else "⬜ ") + c.label(user.language), f"{TOPIC}{mode}:{c.id}")
+                    for c in categories])
     rows.append([_button(L.TOPIC_ALL, f"{TOPIC_ALL}{mode}"), _button(L.TOPIC_NONE, f"{TOPIC_NONE}{mode}")])
     rows.append([_button(L.TOPIC_SAVE, f"{TOPIC_SAVE}{mode}"),
                  _button(L.TOPIC_SKIP if mode == "o" else L.TOPIC_CANCEL, f"{TOPIC_SKIP}{mode}")])
@@ -465,8 +489,8 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer(L.NEWS_LANGUAGES[value])
         else:
             await query.answer()
-            rows = [[_button(_mark(code == user.news_language, label), f"{SETTINGS}nl:{code}")]
-                    for code, label in L.NEWS_LANGUAGES.items()]
+            rows = _column([(("✅ " if code == user.news_language else "⬜ ") + label, f"{SETTINGS}nl:{code}")
+                            for code, label in L.NEWS_LANGUAGES.items()])
             await _show(update, context, L.NEWS_LANGUAGE_PROMPT, InlineKeyboardMarkup(rows + [back]))
             return
     elif action == "mute":
@@ -508,8 +532,8 @@ def _mute_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
     interests_ = db.interests(user.telegram_id)
     categories = [c for c in db.categories() if c.id in interests_]
-    rows = [[_button(("🔔 " if interests_[c.id] else "🔕 ") + c.label(user.language), f"{SETTINGS}mute:{c.id}")]
-            for c in categories]
+    rows = _column([(("🔔 " if interests_[c.id] else "🔕 ") + c.label(user.language), f"{SETTINGS}mute:{c.id}")
+                    for c in categories])
     rows.append([_button(L.BACK, f"{SETTINGS}menu")])
     return (L.MUTE_PROMPT if categories else L.MUTE_NONE), InlineKeyboardMarkup(rows)
 
@@ -715,8 +739,8 @@ def _providers_screen(user: User, page: int) -> tuple[str, InlineKeyboardMarkup]
     pages = max(1, -(-len(providers) // PROVIDERS_PER_PAGE))
     page = min(max(page, 0), pages - 1)
     chunk = providers[page * PROVIDERS_PER_PAGE:(page + 1) * PROVIDERS_PER_PAGE]
-    rows = [[_button(("✅" if p.is_enabled else "⏸") + ("⚠️" if p.consecutive_failures else "")
-                     + f" {p.name} · {p.key}", f"{ADMIN}pc:{p.id}:{page}")] for p in chunk]
+    rows = _column([(("✅" if p.is_enabled else "⏸") + ("⚠️" if p.consecutive_failures else PAD * 2)
+                     + f" {p.name} · {p.key}", f"{ADMIN}pc:{p.id}:{page}") for p in chunk])
     if pages > 1:
         rows.append([_button("◀️", f"{ADMIN}prov:{page - 1}") if page > 0 else _button(" ", NOOP),
                      _button(f"{page + 1}/{pages}", NOOP),
@@ -745,8 +769,8 @@ def _provider_card(user: User, provider_id: int, page: int) -> tuple[str, Inline
 
 def _categories_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
-    rows = _pairs([_button(("✅ " if c.is_active else "⏸ ") + c.label(user.language), f"{ADMIN}ct:{c.id}")
-                   for c in db.categories(active_only=False)])
+    rows = _column([(("✅ " if c.is_active else "⏸ ") + c.label(user.language), f"{ADMIN}ct:{c.id}")
+                    for c in db.categories(active_only=False)])
     rows.append([_button(L.BACK, f"{ADMIN}menu")])
     return L.CATEGORIES_TITLE, InlineKeyboardMarkup(rows)
 
