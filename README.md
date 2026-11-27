@@ -42,7 +42,7 @@ Topic choices are only used to pick alerts. They aren't used to guess anyone's v
 
 **Super admins** also get `/backup`: a zip with one CSV per table (`users.csv`, `providers.csv`… open in Excel; all of them restore with `COPY`) sent to every super admin at 00:00 `TIMEZONE` each night (can be turned off), plus **📦 Back up now**.
 
-**Web admin page** (`http://<server>:8000`, login `ADMIN_USERNAME` / `ADMIN_PASSWORD`):
+**Web admin page** (`http://<server>:<ADMIN_PORT>`, 8000 unless set, login `ADMIN_USERNAME` / `ADMIN_PASSWORD`):
 - **Overview**: the numbers above, every provider with its state, topics and confidences, interval, last success, last error and article count. Enable / disable, fetch now, edit the interval, topics and notes, and **add a provider** (added disabled).
 - **Topics**: turn topics on or off, edit their keywords and weights, add a topic.
 - **Articles**: newest articles with their topics, confidence and the reason (which keywords matched); filter by provider or to **articles with no confident topic**. **Correct the topics** of an article by hand: if it's recent, people following a newly added topic get it (still never twice).
@@ -138,10 +138,12 @@ Same as the report bot: all production configuration lives in GitHub (**Settings
 | `DEFAULT_MAX_PER_DAY` | `30` | daily alert limit for new users (0 = none) |
 | `MESSAGES_PER_SECOND` | `20` | sending speed (Telegram allows about 30) |
 | `DOMAIN` | (none) | serve the admin page at `https://DOMAIN` through Caddy |
-| `ADMIN_BIND` / `ADMIN_PORT` | `127.0.0.1` / `8000` | where the plain-HTTP admin page listens |
+| `ADMIN_PORT` | `8000` | port of the admin page; it listens on all the server's interfaces (`0.0.0.0`) |
 | `DEPLOY_PORT` / `DEPLOY_PATH` | `22` / `news-bot` | SSH port, folder in the SSH user's home |
 
 **About the database secrets.** PostgreSQL runs in its own container (`news-bot-postgres`) with its data in the `pg-data` volume, and isn't published on any port: only the bot container reaches it. It's created with `POSTGRES_USER` / `POSTGRES_PASSWORD` on the first deploy. Changing `POSTGRES_PASSWORD` later is fine: every deploy sets the database password to the secret before starting the bot. Don't change `POSTGRES_USER` or `POSTGRES_DB` after the first deploy (the existing database keeps the old ones); to move to new ones, restore a backup into a fresh volume.
+
+**Opening the admin page.** It listens on all the server's network interfaces (`0.0.0.0`) at `ADMIN_PORT`, so it's at `http://<server ip>:<ADMIN_PORT>`; allow that port in the server's firewall. It's plain HTTP, so the login password travels unencrypted: limit the port to the addresses that need it, or set `DOMAIN` to serve it over HTTPS through Caddy.
 
 If it runs on the same server as the report bot, give it a different `ADMIN_PORT` (e.g. `8001`) and `DEPLOY_PATH`. The compose project and container names are already different.
 

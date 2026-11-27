@@ -23,7 +23,7 @@
 #   CLASSIFY_MIN_CONFIDENCE (0.6), MAX_ARTICLE_AGE_HOURS (12), ARTICLE_RETENTION_DAYS (30),
 #   DEFAULT_MAX_PER_DAY (30), MESSAGES_PER_SECOND (20),
 #   DOMAIN       when set, also starts Caddy (`--profile https`) and serves the admin page at https://DOMAIN
-#   ADMIN_BIND (127.0.0.1), ADMIN_PORT (8000)   where the plain-HTTP admin page is published on the server
+#   ADMIN_PORT (8000)    the port the admin page listens on, on all of the server's interfaces (0.0.0.0)
 #
 # Every runtime setting comes from here: the workflow writes the server's .env on each deploy and
 # overwrites any hand edits there. Setup steps: see "Deploy with GitHub Actions" in README.md.
@@ -170,15 +170,13 @@ jobs:
           ARTICLE_RETENTION_DAYS: ${{ vars.ARTICLE_RETENTION_DAYS }}
           DEFAULT_MAX_PER_DAY: ${{ vars.DEFAULT_MAX_PER_DAY }}
           MESSAGES_PER_SECOND: ${{ vars.MESSAGES_PER_SECOND }}
-          ADMIN_BIND: ${{ vars.ADMIN_BIND || '127.0.0.1' }}
           ADMIN_PORT: ${{ vars.ADMIN_PORT || '8000' }}
         run: |
           umask 077
           mkdir -p deploy-env
-          if ! [[ "$ADMIN_BIND" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
-            echo "::error::ADMIN_BIND must be an IPv4 address such as 127.0.0.1 or 0.0.0.0 (got: $ADMIN_BIND)"; exit 1
+          if ! [[ "$ADMIN_PORT" =~ ^[0-9]+$ ]] || [ "$ADMIN_PORT" -lt 1 ] || [ "$ADMIN_PORT" -gt 65535 ]; then
+            echo "::error::ADMIN_PORT must be a port number from 1 to 65535 (got: $ADMIN_PORT)."; exit 1
           fi
-          if ! [[ "$ADMIN_PORT" =~ ^[0-9]+$ ]]; then echo "::error::ADMIN_PORT must be a number."; exit 1; fi
           if [ -n "$DOMAIN" ] && ! [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then
             echo "::error::DOMAIN must be a bare hostname like admin.example.com (no https://, no path)."; exit 1
           fi
@@ -190,7 +188,7 @@ jobs:
           for name in BOT_TOKEN BOT_NAME SUPER_ADMIN_IDS ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY \
                       POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB TIMEZONE \
                       CLASSIFY_MIN_CONFIDENCE MAX_ARTICLE_AGE_HOURS ARTICLE_RETENTION_DAYS DEFAULT_MAX_PER_DAY \
-                      MESSAGES_PER_SECOND ADMIN_BIND ADMIN_PORT DOMAIN; do
+                      MESSAGES_PER_SECOND ADMIN_PORT DOMAIN; do
             value=${!name}
             [ -z "$value" ] && continue
             if [[ "$value" == *"'"* || "$value" == *$'\n'* ]]; then

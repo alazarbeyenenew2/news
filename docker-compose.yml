@@ -1,7 +1,7 @@
 # Production: deployed by .github/workflows/deploy.yml, which writes .env from GitHub secrets/variables.
 # Manual run (local testing only):
 #   cp .env.example .env   # fill it in
-#   docker compose up -d --build                    # bot + admin page on 127.0.0.1:8000
+#   docker compose up -d --build                    # bot + admin page on port ADMIN_PORT (default 8000)
 #   docker compose --profile https up -d --build    # also serve the admin page over HTTPS at $DOMAIN
 #
 # Run only ONE copy of the bot: Telegram allows a single long-polling connection per token.
@@ -52,9 +52,9 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      # Loopback only by default, so the admin page isn't exposed over plain HTTP.
-      # Reach it through an SSH tunnel, the Caddy service below, or set ADMIN_BIND=0.0.0.0.
-      - "${ADMIN_BIND:-127.0.0.1}:${ADMIN_PORT:-8000}:8000"
+      # The admin page on every network interface, at the port set by the ADMIN_PORT GitHub variable.
+      # It's plain HTTP: open the port only to the addresses that need it, or use the Caddy service below.
+      - "0.0.0.0:${ADMIN_PORT:-8000}:8000"
     stop_grace_period: 30s
     deploy:
       resources:
