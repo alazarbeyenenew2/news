@@ -176,3 +176,25 @@ def test_users_page_shows_telegram_profiles(client):
     assert bot.calls.count(("getFile", "f1")) == 1 and bot.calls.count(("getChat", 100)) == 1  # cached
     assert client.get("/users/200/photo").status_code == 404
     assert client.get("/users/999/photo").status_code == 404
+
+
+def test_users_page_is_paginated_after_ten(client):
+    csrf = login(client)
+    for i in range(23):
+        db.upsert_user(1000 + i, 1000 + i, f"user{i}", f"Person{i:02d}")
+    first = client.get("/users").text
+    assert "23 users" in first and "showing 1–10" in first
+    assert first.count('action="/users/') // 3 == 10  # 10 rows (3 action forms each)
+    assert 'href="/users?page_no=2"' in first and "Next →" in first
+    last = client.get("/users?page_no=3").text
+    assert "showing 21–23" in last and 'aria-current="page">3<' in last
+    assert client.get("/users?page_no=9", follow_redirects=False).headers["location"].endswith("page_no=3")
+    # Searching pages the matches; actions return to the same page.
+    found = client.get("/users?q=user1").text  # user1, user10–user19
+    assert "11 users matching" in found and 'page_no=2&amp;q=user1' in found
+    r = client.post("/users/1005/disable", data={"csrf": csrf, "page_no": "2"}, follow_redirects=False)
+    assert "page_no=2" in r.headers["location"]
+    few = TestClient(client.app)
+    login(few)
+    db.execute("DELETE FROM users WHERE telegram_id >= 1010")
+    assert 'class="pager"' not in few.get("/users").text  # 10 or fewer: no pager

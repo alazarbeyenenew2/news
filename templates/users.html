@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% block heading %}Users{% endblock %}
-{% block subheading %}<p>{{ rows | length }} {{ "user" if rows | length == 1 else "users" }}{% if q %} matching “{{ q }}”{% endif %}</p>{% endblock %}
+{% block subheading %}<p>{{ total }} {{ "user" if total == 1 else "users" }}{% if q %} matching “{{ q }}”{% endif %}{% if pages > 1 %} · showing {{ (page_no - 1) * per_page + 1 }}–{{ (page_no - 1) * per_page + rows | length }}{% endif %}</p>{% endblock %}
 {% block head %}<style>.prefs { display: flex; flex-direction: column; gap: 5px; } .prefs .chips { display: flex; flex-wrap: wrap; gap: 2px; }
+  .pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .pager .pages { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .pager .btn.current { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .pager .btn.disabled { opacity: .45; pointer-events: none; }
+  .pager .gap { padding: 0 4px; color: var(--muted); }
   .person { display: flex; align-items: flex-start; gap: 10px; }
   .avatar { position: relative; flex: none; width: 40px; height: 40px; border-radius: 50%; overflow: hidden;
             display: grid; place-items: center; font-weight: 700; font-size: 14px; text-decoration: none;
@@ -66,7 +71,7 @@
           <div class="actions" style="flex-wrap:nowrap">
             {% macro act(action, label, cls="", confirm=None) %}
             <form method="post" action="/users/{{ u.telegram_id }}/{{ action }}" {% if confirm %}onsubmit="return confirm('{{ confirm }}')"{% endif %}>
-              <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ q }}">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="page_no" value="{{ page_no }}">
               <button class="{{ cls }}" type="submit">{{ label }}</button>
             </form>
             {% endmacro %}
@@ -83,5 +88,19 @@
     </tbody>
   </table>
   </div>
+  {% if pages > 1 %}
+  {% set qs = "&q=" ~ (q | urlencode) if q else "" %}
+  <nav class="pager" aria-label="Pages">
+    {% if page_no > 1 %}<a class="btn" href="/users?page_no={{ page_no - 1 }}{{ qs }}">← Previous</a>{% else %}<span class="btn disabled">← Previous</span>{% endif %}
+    <span class="pages">
+    {% for n in range(1, pages + 1) %}
+      {% if n == 1 or n == pages or (n - page_no) | abs <= 2 %}
+        {% if n == page_no %}<span class="btn current" aria-current="page">{{ n }}</span>{% else %}<a class="btn" href="/users?page_no={{ n }}{{ qs }}">{{ n }}</a>{% endif %}
+      {% elif n == 2 or n == pages - 1 %}<span class="gap">…</span>{% endif %}
+    {% endfor %}
+    </span>
+    {% if page_no < pages %}<a class="btn" href="/users?page_no={{ page_no + 1 }}{{ qs }}">Next →</a>{% else %}<span class="btn disabled">Next →</span>{% endif %}
+  </nav>
+  {% endif %}
 </div>
 {% endblock %}

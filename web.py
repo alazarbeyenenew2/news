@@ -41,6 +41,7 @@ def _ago(iso: str | None) -> str:
 
 templates.env.filters["ago"] = _ago
 KEY = re.compile(r"^[a-z0-9_]{2,40}$")
+USERS_PER_PAGE = 10
 
 
 def create_web_app(lifespan=None) -> FastAPI:
@@ -284,15 +285,20 @@ def create_web_app(lifespan=None) -> FastAPI:
 
     # ---------- users ----------
     @app.get("/users", response_class=HTMLResponse)
-    async def users_page(request: Request, q: str = ""):
+    async def users_page(request: Request, q: str = "", page_no: int = 1):
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
-        rows = db.list_users(q)
+        rows, total = db.list_users(q, limit=USERS_PER_PAGE, offset=(max(page_no, 1) - 1) * USERS_PER_PAGE)
+        pages = max(1, -(-total // USERS_PER_PAGE))
+        if page_no > pages or page_no < 1:  # e.g. the last user on the last page was deleted
+            return RedirectResponse(f"/users?{urlencode({'q': q, 'page_no': min(max(page_no, 1), pages)})}",
+                                    status_code=303)
         ids = [r["user"].telegram_id for r in rows]
         prefs = db.user_preferences(ids)
         telegram = worker(request, "telegram")
         profiles = await request.app.state.profiles.get_many(telegram.bot, ids) if telegram else {}
-        return page(request, "users.html", rows=rows, q=q, prefs=prefs, profiles=profiles)
+        return page(request, "users.html", rows=rows, q=q, prefs=prefs, profiles=profiles, total=total,
+                    page_no=page_no, pages=pages, per_page=USERS_PER_PAGE)
 
     @app.get("/users/{telegram_id}/photo")
     async def user_photo(request: Request, telegram_id: int):
@@ -311,7 +317,7 @@ def create_web_app(lifespan=None) -> FastAPI:
 
     @app.post("/users/{telegram_id}/{action}")
     async def user_action(request: Request, telegram_id: int, action: str, csrf: str = Form(...),
-                          q: str = Form("")):
+                          q: str = Form(""), page_no: int = Form(1)):
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
         check_csrf(request, csrf)
@@ -319,11 +325,11 @@ def create_web_app(lifespan=None) -> FastAPI:
         if not user:
             raise HTTPException(404, "User not found")
         if user.is_super_admin:
-            return _back("/users", "Super admins (SUPER_ADMIN_IDS) can't be changed here.", q=q)
+            return _back("/users", "Super admins (SUPER_ADMIN_IDS) can't be changed here.", q=q, page_no=page_no)
         if action == "delete":
             db.delete_user(telegram_id)
             request.app.state.profiles.forget(telegram_id)
-            return _back("/users", f"{user.display_name} was deleted with all their data.", q=q)
+            return _back("/users", f"{user.display_name} was deleted with all their data.", q=q, page_no=page_no)
         changes = {"disable": {"status": "disabled", "notifications_enabled": False},
                    "enable": {"status": "active"},
                    "make_admin": {"role": "admin"}, "remove_admin": {"role": "user"}}
@@ -336,7 +342,7 @@ def create_web_app(lifespan=None) -> FastAPI:
         if telegram is not None and action in ("make_admin", "remove_admin"):
             from bot import set_commands_for
             await set_commands_for(telegram, db.get_user(telegram_id))
-        return _back("/users", f"{user.display_name}: {action.replace('_', ' ')} done.", q=q)
+        return _back("/users", f"{user.display_name}: {action.replace('_', ' ')} done.", q=q, page_no=page_no)
 
     return app
 

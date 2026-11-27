@@ -58,7 +58,7 @@ Topic choices are only used to pick alerts. They aren't used to guess anyone's v
 - **Topics**: turn topics on or off, edit their keywords and weights, add a topic.
 - **Articles**: newest articles with their topics, confidence and the reason (which keywords matched); filter by provider or to **articles with no confident topic**. **Correct the topics** of an article by hand: if it's recent, people following a newly added topic get it (still never twice).
 - **Failed alerts**: what failed and why, retry one or all.
-- **Users**: search; each user's **preferences** (topics, with muted ones struck through; CVE reports; alerts on or paused; daily limit; language and news language; and, expandable, the sources they switched off and their CVE severity and technologies); make or remove admins; disable or enable a user.
+- **Users**: search, 10 users per page with page links; each user's **preferences** (topics, with muted ones struck through; CVE reports; alerts on or paused; daily limit; language and news language; and, expandable, the sources they switched off and their CVE severity and technologies); make or remove admins; disable, enable or delete a user.
 
 ## How news is collected
 

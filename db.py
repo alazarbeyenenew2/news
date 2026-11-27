@@ -391,8 +391,9 @@ class Database:
                      list(values.values()) + [_now(), telegram_id])
         return self.get_user(telegram_id)
 
-    def list_users(self, search: str = "") -> list[dict]:
-        """Users with their topic count and alerts sent today (for the admin page)."""
+    def list_users(self, search: str = "", limit: int | None = None, offset: int = 0) -> tuple[list[dict], int]:
+        """A page of users (newest first) with their topic count and alerts sent today, and how many users
+        match the search in all (for the admin page)."""
         search = search.strip()
         like = f"%{search}%"
         rows = self.execute(
@@ -401,13 +402,18 @@ class Database:
                    (SELECT COUNT(*) FROM user_interests i WHERE i.user_id = u.telegram_id AND i.is_enabled)
                        AS topics,
                    (SELECT COUNT(*) FROM notifications n WHERE n.user_id = u.telegram_id AND n.status = 'sent'
-                        AND n.sent_at >= %s) AS sent_today
+                        AND n.sent_at >= %s) AS sent_today,
+                   COUNT(*) OVER () AS total
             FROM users u
             WHERE %s = '' OR u.first_name ILIKE %s OR u.username ILIKE %s OR u.telegram_id::text LIKE %s
-            ORDER BY u.created_at DESC
+            ORDER BY u.created_at DESC, u.telegram_id
+            LIMIT %s OFFSET %s
             """,
-            (day_start_utc(local_today()), search, like, like, like)).fetchall()
-        return [{"user": _row(User, r), "topics": r["topics"], "sent_today": r["sent_today"]} for r in rows]
+            (day_start_utc(local_today()), search, like, like, like, limit, max(offset, 0))).fetchall()
+        total = rows[0]["total"] if rows else (self._one(
+            """SELECT COUNT(*) FROM users u WHERE %s = '' OR u.first_name ILIKE %s OR u.username ILIKE %s
+               OR u.telegram_id::text LIKE %s""", (search, like, like, like)) if offset else 0)
+        return [{"user": _row(User, r), "topics": r["topics"], "sent_today": r["sent_today"]} for r in rows], total
 
     def delete_user(self, telegram_id: int) -> bool:
         """Remove a user and everything about them (topics, sources, CVE technologies, alert history:
