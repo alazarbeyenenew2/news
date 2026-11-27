@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="stats">
+  <div class="card stat"><span class="muted">Users getting alerts</span><b>{{ stats.active_users }}</b><span class="small muted">of {{ stats.users }} · {{ stats.paused_users }} paused · {{ stats.blocked_users }} blocked the bot</span></div>
+  <div class="card stat"><span class="muted">Articles today</span><b>{{ stats.articles_today }}</b><span class="small muted">{{ stats.duplicates_today }} same story · <a href="/articles?low=1">{{ stats.low_confidence_today }} need review</a></span></div>
+  <div class="card stat"><span class="muted">Queue</span><b>{{ stats.queued }}</b><span class="small muted">oldest due {{ stats.queue_oldest | local }} · {{ stats.held_for_digest }} held for digests</span></div>
+  <div class="card stat"><span class="muted">Sent today</span><b>{{ stats.sent_today }}</b><span class="small muted"><a href="/notifications">{{ stats.failed_today }} failed</a> · {{ stats.skipped_today }} skipped</span></div>
+  <div class="card stat"><span class="muted">Providers</span><b>{{ stats.providers_enabled }}</b><span class="small muted">on · {{ stats.providers_failing }} failing</span></div>
+</div>
+
+<div class="card">
+  <h2>📡 Providers</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Provider</th><th>State</th><th>Topics (confidence)</th><th>Every</th><th>Last success</th><th>Last error</th><th>Articles</th><th></th></tr></thead>
+    <tbody>
+    {% for p in providers %}
+      <tr>
+        <td><b>{{ p.name }}</b><br><span class="muted small">{{ p.key }} · {{ p.language }}</span><br>
+            <a class="small" href="{{ p.feed_url }}" rel="noreferrer noopener" target="_blank">feed</a> ·
+            <a class="small" href="/articles?provider={{ p.id }}">articles</a></td>
+        <td>{% if p.is_enabled %}<span class="badge b-on">on</span>{% else %}<span class="badge b-off">off</span>{% endif %}
+            {% if p.consecutive_failures %}<br><span class="badge b-bad">{{ p.consecutive_failures }} failures</span>{% endif %}</td>
+        <td class="small">{% for k, v in p.categories.items() %}{% set c = categories.get(k) %}<span class="badge b-info">{{ c.emoji if c else '?' }} {{ c.name_en if c else k }} {{ v }}</span> {% endfor %}</td>
+        <td class="small">{{ p.polling_interval_seconds // 60 }} min</td>
+        <td class="small muted">{{ p.last_success_at | local }}</td>
+        <td class="small" style="max-width:220px;color:var(--danger)">{{ p.last_error or "" }}</td>
+        <td>{{ p.articles_total }}</td>
+        <td>
+          <div class="actions">
+            <form method="post" action="/providers/{{ p.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="{{ 'danger' if p.is_enabled else 'ok' }}" type="submit">{{ "Disable" if p.is_enabled else "Enable" }}</button></form>
+            <form method="post" action="/providers/{{ p.id }}/fetch"><input type="hidden" name="csrf" value="{{ csrf }}">
+              <button type="submit" {{ 'disabled' if not p.is_enabled }}>Fetch now</button></form>
+          </div>
+          <details><summary class="small">Edit</summary>
+            <form method="post" action="/providers/{{ p.id }}/edit" style="display:grid;gap:6px;margin-top:6px;min-width:260px">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <label class="small">Polling interval (seconds) <input name="interval" type="number" min="60" max="86400" value="{{ p.polling_interval_seconds }}"></label>
+              <label class="small">Topics: {"topic_key": confidence}</label>
+              <textarea name="categories" rows="3">{{ p.categories | tojson_pretty }}</textarea>
+              <label class="small">Notes (licensing / access review)</label>
+              <textarea name="notes" rows="3">{{ p.notes or "" }}</textarea>
+              <button class="primary" type="submit">Save</button>
+            </form>
+          </details>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>➕ Add a provider</h2>
+  <p class="small muted">Only official RSS/Atom feeds the publisher offers. It's added <b>disabled</b>: review the publisher's terms and robots policy, then enable it.</p>
+  <form method="post" action="/providers" class="grid-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="key" placeholder="key, e.g. bbc_world" required pattern="[a-z0-9_]{2,40}">
+    <input name="name" placeholder="Name shown to users" required>
+    <input name="base_url" placeholder="Website https://…" required>
+    <input name="feed_url" placeholder="Feed URL https://…" required>
+    <input name="language" placeholder="Language (en, am…)" value="en">
+    <input name="interval" type="number" min="60" max="86400" value="900" title="Polling interval (seconds)">
+    <input name="categories" placeholder='Topics: {"world": 0.8}' value="{}">
+    <input name="notes" placeholder="Notes (terms reviewed on …)">
+    <button class="primary" type="submit">Add</button>
+  </form>
+</div>
+{% endblock %}

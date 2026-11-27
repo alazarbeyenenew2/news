@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <header style="margin-bottom:8px"><h2 style="margin:0">⚠️ Failed alerts</h2>
+    {% if failed %}<form method="post" action="/notifications/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="primary" type="submit">Retry all</button></form>{% endif %}
+  </header>
+  <p class="small muted">Alerts that failed permanently or ran out of attempts. Users who blocked the bot are marked as such and not retried.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>User</th><th>Article</th><th>Attempts</th><th>Error</th><th>When</th><th></th></tr></thead>
+    <tbody>
+    {% for f in failed %}
+      <tr>
+        <td>{{ f.first_name or f.user_id }}{% if f.username %}<br><span class="muted small">@{{ f.username }}</span>{% endif %}</td>
+        <td style="max-width:360px">{{ f.title }}</td>
+        <td>{{ f.attempt_count }}</td>
+        <td class="small" style="color:var(--danger);max-width:300px">{{ f.last_error }}</td>
+        <td class="small muted">{{ f.updated_at | local }}</td>
+        <td><form method="post" action="/notifications/retry"><input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="notification_id" value="{{ f.id }}"><button type="submit">Retry</button></form></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted" style="text-align:center;padding:30px">No failed alerts. 🎉</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

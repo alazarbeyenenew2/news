@@ -1,0 +1,7 @@
+{$DOMAIN} {
+	encode gzip
+	# /metrics and /ready are for the server itself, not the internet.
+	@internal path /metrics /ready
+	respond @internal 404
+	reverse_proxy bot:8000
+}

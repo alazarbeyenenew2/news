@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+  <title>Example Sports</title>
+  <id>urn:example:sports</id>
+  <updated>2026-11-27T12:00:00Z</updated>
+  <entry>
+    <title>Striker scores twice as champions win Premier League derby</title>
+    <link rel="alternate" href="https://sport.example.org/football/derby-report"/>
+    <id>urn:example:sports:42</id>
+    <updated>2026-11-27T11:45:00Z</updated>
+    <summary type="html">&lt;p&gt;A brace from the striker settled the derby.&lt;/p&gt;</summary>
+    <category term="Football"/>
+  </entry>
+</feed>

@@ -1,0 +1,142 @@
+{
+  "_comment": "Copied into the database on first start; new keys are added on later starts, existing ones are left alone (edit them on the admin page). keywords: phrase -> weight (0..1). A phrase in the headline counts in full, in the summary at 60%. ASCII phrases match whole words, case-insensitively; Amharic phrases match anywhere (prefixes like በ- / የ- stay attached).",
+  "categories": [
+    {
+      "key": "cybersecurity", "emoji": "🔐", "name_en": "Cybersecurity", "name_am": "ሳይበር ደህንነት",
+      "description": "CVEs, vulnerabilities, malware, data breaches",
+      "keywords": {
+        "cybersecurity": 0.9, "cyber security": 0.9, "cyberattack": 0.9, "cyber attack": 0.9, "cyberattacks": 0.9,
+        "ransomware": 0.9, "malware": 0.9, "spyware": 0.9, "infostealer": 0.9, "botnet": 0.9, "phishing": 0.9,
+        "zero-day": 0.9, "zero day": 0.8, "cve": 0.9, "data breach": 0.9, "vulnerability": 0.7, "vulnerabilities": 0.7,
+        "security flaw": 0.8, "exploit": 0.6, "exploited": 0.6, "hacker": 0.7, "hackers": 0.7, "hacked": 0.7,
+        "hacking": 0.7, "threat actor": 0.8, "threat actors": 0.8, "backdoor": 0.7, "trojan": 0.7, "ddos": 0.9,
+        "breach": 0.4, "cisa": 0.6, "patch": 0.3, "ሳይበር": 0.8
+      }
+    },
+    {
+      "key": "technology", "emoji": "💻", "name_en": "Technology", "name_am": "ቴክኖሎጂ",
+      "description": "AI, software, cloud, devices",
+      "keywords": {
+        "artificial intelligence": 0.8, "ai": 0.5, "chatgpt": 0.8, "openai": 0.7, "anthropic": 0.7, "chatbot": 0.7,
+        "tech": 0.6, "technology": 0.6, "software": 0.5, "smartphone": 0.7, "iphone": 0.7, "android": 0.7,
+        "semiconductor": 0.7, "chip": 0.5, "chips": 0.5, "nvidia": 0.6, "microsoft": 0.5, "google": 0.5, "apple": 0.4,
+        "meta": 0.3, "startup": 0.5, "robot": 0.6, "robots": 0.6, "internet": 0.5, "5g": 0.7, "starlink": 0.7,
+        "data centre": 0.7, "data center": 0.7, "quantum computing": 0.8, "telecom": 0.6, "ethio telecom": 0.7,
+        "safaricom": 0.6, "cloud computing": 0.8, "app": 0.3, "ቴክኖሎጂ": 0.8
+      }
+    },
+    {
+      "key": "sports", "emoji": "⚽", "name_en": "Sports", "name_am": "ስፖርት",
+      "description": "Football, basketball, athletics, tennis",
+      "keywords": {
+        "football": 0.8, "premier league": 0.9, "champions league": 0.9, "fifa": 0.9, "uefa": 0.9, "afcon": 0.9,
+        "world cup": 0.7, "olympic": 0.8, "olympics": 0.8, "marathon": 0.8, "athletics": 0.8, "athlete": 0.6,
+        "tennis": 0.8, "wimbledon": 0.9, "grand slam": 0.7, "basketball": 0.8, "nba": 0.9, "cricket": 0.8,
+        "rugby": 0.8, "formula 1": 0.8, "f1": 0.7, "boxing": 0.7, "ufc": 0.8, "striker": 0.8, "midfielder": 0.8,
+        "goalkeeper": 0.8, "coach": 0.4, "tournament": 0.5, "league": 0.4, "match": 0.3, "manchester united": 0.7,
+        "arsenal": 0.7, "liverpool": 0.5, "chelsea": 0.6, "real madrid": 0.7, "barcelona": 0.4, "ስፖርት": 0.8,
+        "እግር ኳስ": 0.9, "አትሌቲክስ": 0.9
+      }
+    },
+    {
+      "key": "war_conflict", "emoji": "⚔️", "name_en": "War & Conflict", "name_am": "ጦርነትና ግጭት",
+      "description": "Armed conflicts, military developments, peace negotiations",
+      "keywords": {
+        "war": 0.6, "airstrike": 0.8, "airstrikes": 0.8, "air strike": 0.8, "air strikes": 0.8, "drone strike": 0.8,
+        "drone strikes": 0.8, "shelling": 0.8, "ceasefire": 0.8, "truce": 0.7, "peace talks": 0.7, "peace deal": 0.6,
+        "troops": 0.5, "military": 0.4, "armed group": 0.7, "armed groups": 0.7, "rebels": 0.6, "rebel": 0.6,
+        "militia": 0.6, "militias": 0.6, "insurgents": 0.7, "insurgency": 0.7, "invasion": 0.6, "missile": 0.6,
+        "missiles": 0.6, "frontline": 0.6, "front line": 0.6, "fighting": 0.4, "clashes": 0.6, "army": 0.4,
+        "fano": 0.6, "hostages": 0.6, "conflict": 0.5, "ጦርነት": 0.9, "ግጭት": 0.8
+      }
+    },
+    {
+      "key": "politics", "emoji": "🏛", "name_en": "Politics", "name_am": "ፖለቲካ",
+      "description": "Elections, government, policy, diplomacy",
+      "keywords": {
+        "election": 0.8, "elections": 0.8, "electoral": 0.8, "referendum": 0.8, "ballot": 0.8, "voters": 0.6,
+        "vote": 0.5, "votes": 0.5, "parliament": 0.6, "parliamentary": 0.6, "senate": 0.6, "congress": 0.5,
+        "prime minister": 0.5, "president": 0.3, "government": 0.3, "minister": 0.3, "opposition": 0.5,
+        "legislation": 0.6, "lawmakers": 0.6, "mps": 0.5, "diplomacy": 0.5, "diplomatic": 0.5, "coalition": 0.4,
+        "campaign": 0.3, "policy": 0.3, "political": 0.5, "politics": 0.6, "ምርጫ": 0.9, "ፓርላማ": 0.8, "ፖለቲካ": 0.8
+      }
+    },
+    {
+      "key": "business", "emoji": "💼", "name_en": "Business & Finance", "name_am": "ንግድና ፋይናንስ",
+      "description": "Markets, companies, economy",
+      "keywords": {
+        "economy": 0.7, "economic": 0.5, "inflation": 0.8, "interest rate": 0.8, "interest rates": 0.8,
+        "central bank": 0.8, "national bank of ethiopia": 0.9, "gdp": 0.8, "stock market": 0.8, "stocks": 0.6,
+        "shares": 0.5, "investors": 0.7, "markets": 0.4, "tariff": 0.7, "tariffs": 0.7, "trade": 0.4, "imf": 0.7,
+        "world bank": 0.7, "profit": 0.6, "profits": 0.7, "revenue": 0.6, "earnings": 0.6, "birr": 0.8,
+        "currency": 0.6, "oil prices": 0.8, "ceo": 0.5, "merger": 0.8, "acquisition": 0.6, "bitcoin": 0.6,
+        "crypto": 0.6, "debt": 0.5, "exports": 0.6, "company": 0.3, "bank": 0.4, "ኢኮኖሚ": 0.9, "ብር": 0.3
+      }
+    },
+    {
+      "key": "ethiopia", "emoji": "🇪🇹", "name_en": "Ethiopia", "name_am": "ኢትዮጵያ",
+      "description": "National news, local developments",
+      "keywords": {
+        "ethiopia": 0.9, "ethiopian": 0.8, "ethiopians": 0.8, "addis ababa": 0.9, "tigray": 0.8, "amhara": 0.8,
+        "oromia": 0.8, "afar": 0.5, "sidama": 0.8, "abiy ahmed": 0.9, "abiy": 0.6, "renaissance dam": 0.8,
+        "gerd": 0.7, "ethio telecom": 0.8, "ethiopian airlines": 0.8, "dire dawa": 0.9, "ኢትዮጵያ": 0.9,
+        "አዲስ አበባ": 0.9, "ትግራይ": 0.8, "አማራ": 0.8, "ኦሮሚያ": 0.8
+      }
+    },
+    {
+      "key": "africa", "emoji": "🌍", "name_en": "Africa", "name_am": "አፍሪካ",
+      "description": "African regional news",
+      "keywords": {
+        "africa": 0.8, "african": 0.7, "african union": 0.9, "sahel": 0.8, "ecowas": 0.9, "ethiopia": 0.6,
+        "kenya": 0.6, "nigeria": 0.6, "south africa": 0.7, "sudan": 0.6, "south sudan": 0.7, "somalia": 0.6,
+        "eritrea": 0.6, "djibouti": 0.6, "egypt": 0.5, "uganda": 0.6, "tanzania": 0.6, "rwanda": 0.6,
+        "dr congo": 0.6, "congo": 0.5, "ghana": 0.6, "senegal": 0.6, "mali": 0.6, "niger": 0.5, "burkina faso": 0.6,
+        "cameroon": 0.6, "mozambique": 0.6, "zimbabwe": 0.6, "zambia": 0.6, "morocco": 0.5, "libya": 0.5,
+        "tunisia": 0.5, "algeria": 0.5, "angola": 0.6, "malawi": 0.6, "chad": 0.5, "nairobi": 0.6, "lagos": 0.6,
+        "khartoum": 0.6, "mogadishu": 0.6, "አፍሪካ": 0.9
+      }
+    },
+    {
+      "key": "world", "emoji": "🌐", "name_en": "World News", "name_am": "የዓለም ዜና",
+      "description": "International developments",
+      "keywords": {
+        "united nations": 0.6, "un security council": 0.7, "secretary-general": 0.5, "g20": 0.6, "g7": 0.6,
+        "nato": 0.5, "summit": 0.4, "foreign minister": 0.5, "refugees": 0.5, "sanctions": 0.5,
+        "international": 0.3, "ዓለም": 0.6
+      }
+    },
+    {
+      "key": "science", "emoji": "🔬", "name_en": "Science", "name_am": "ሳይንስ",
+      "description": "Research, space, environment",
+      "keywords": {
+        "scientists": 0.7, "researchers": 0.6, "research": 0.4, "study": 0.3, "nasa": 0.8, "astronomers": 0.9,
+        "telescope": 0.9, "spacecraft": 0.9, "planet": 0.6, "galaxy": 0.9, "asteroid": 0.9, "rocket": 0.6,
+        "moon": 0.5, "mars": 0.6, "space": 0.4, "climate change": 0.7, "climate": 0.5, "species": 0.6,
+        "biodiversity": 0.7, "fossil": 0.7, "fossils": 0.7, "dinosaur": 0.9, "archaeologists": 0.9, "physics": 0.8,
+        "genome": 0.8, "ሳይንስ": 0.8
+      }
+    },
+    {
+      "key": "health", "emoji": "🩺", "name_en": "Health", "name_am": "ጤና",
+      "description": "Public health and medical research",
+      "keywords": {
+        "health": 0.5, "public health": 0.8, "world health organization": 0.9, "hospital": 0.6, "hospitals": 0.6,
+        "disease": 0.7, "outbreak": 0.8, "vaccine": 0.8, "vaccines": 0.8, "vaccination": 0.8, "cancer": 0.8,
+        "malaria": 0.9, "cholera": 0.9, "measles": 0.9, "mpox": 0.9, "pandemic": 0.8, "virus": 0.6, "patients": 0.6,
+        "doctors": 0.6, "nhs": 0.7, "medical": 0.5, "medicine": 0.5, "mental health": 0.8, "diabetes": 0.8,
+        "obesity": 0.8, "nutrition": 0.6, "ጤና": 0.8, "ወረርሽኝ": 0.9
+      }
+    },
+    {
+      "key": "entertainment", "emoji": "🎬", "name_en": "Entertainment", "name_am": "መዝናኛ",
+      "description": "Film, music, culture",
+      "keywords": {
+        "film": 0.7, "films": 0.7, "movie": 0.7, "movies": 0.7, "box office": 0.9, "oscar": 0.9, "oscars": 0.9,
+        "grammy": 0.9, "grammys": 0.9, "music": 0.6, "album": 0.7, "singer": 0.8, "rapper": 0.8, "actor": 0.8,
+        "actress": 0.8, "celebrity": 0.8, "concert": 0.7, "hollywood": 0.8, "netflix": 0.6, "tv series": 0.7,
+        "tv show": 0.7, "documentary": 0.5, "theatre": 0.6, "theater": 0.6, "fashion": 0.6, "eurovision": 0.9,
+        "festival": 0.4, "ሙዚቃ": 0.8, "ፊልም": 0.8
+      }
+    }
+  ]
+}

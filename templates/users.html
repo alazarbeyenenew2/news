@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <form class="actions" method="get" action="/users" style="margin-bottom:12px">
+    <input name="q" value="{{ q }}" placeholder="Search by name, @username or Telegram ID" style="flex:1;min-width:200px">
+    <button type="submit">Search</button>
+    {% if q %}<a class="btn" href="/users">Clear</a>{% endif %}
+  </form>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>User</th><th>Telegram ID</th><th>Role</th><th>Status</th><th>Alerts</th><th>Topics</th><th>Sent today</th><th>Last seen</th><th></th></tr></thead>
+    <tbody>
+    {% for row in rows %}{% set u = row.user %}
+      <tr>
+        <td><b>{{ u.first_name or "Unknown" }}</b>{% if u.username %}<br><span class="muted">@{{ u.username }}</span>{% endif %}</td>
+        <td class="muted">{{ u.telegram_id }}</td>
+        <td>{% if u.is_super_admin %}<span class="badge b-warn">super admin</span>{% elif u.role == "admin" %}<span class="badge b-info">admin</span>{% else %}<span class="badge b-off">user</span>{% endif %}</td>
+        <td>{% if u.status == "active" %}<span class="badge b-on">active</span>{% elif u.status == "blocked" %}<span class="badge b-warn">blocked the bot</span>{% else %}<span class="badge b-bad">disabled</span>{% endif %}
+            {% if not u.onboarding_completed %}<br><span class="badge b-off">onboarding</span>{% endif %}</td>
+        <td class="small">{{ "on" if u.notifications_enabled else "paused" }} · {{ u.delivery_mode }}{% if u.delivery_mode == "digest" %} {{ "%02d" % u.digest_hour }}:00{% endif %}</td>
+        <td>{{ row.topics }}</td>
+        <td>{{ row.sent_today }}</td>
+        <td class="small muted">{{ u.last_seen_at | local }}</td>
+        <td>
+          {% if not u.is_super_admin %}
+          <div class="actions">
+            {% macro act(action, label, cls="", confirm=None) %}
+            <form method="post" action="/users/{{ u.telegram_id }}/{{ action }}" {% if confirm %}onsubmit="return confirm('{{ confirm }}')"{% endif %}>
+              <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ q }}">
+              <button class="{{ cls }}" type="submit">{{ label }}</button>
+            </form>
+            {% endmacro %}
+            {% if u.role == "admin" %}{{ act("remove_admin", "Remove admin") }}{% else %}{{ act("make_admin", "Make admin") }}{% endif %}
+            {% if u.status == "disabled" %}{{ act("enable", "Enable", "ok") }}{% else %}{{ act("disable", "Disable", "danger", "Stop all alerts to this user?") }}{% endif %}
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="muted" style="text-align:center;padding:30px">No users yet. Users appear here after they send /start to the bot.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

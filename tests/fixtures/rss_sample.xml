@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Example Security News</title>
+    <link>https://news.example.com/</link>
+    <language>en-gb</language>
+    <item>
+      <title><![CDATA[Critical vulnerability CVE-2026-1234 exploited in popular VPN software]]></title>
+      <description><![CDATA[<p>Attackers are <b>actively exploiting</b> a flaw in a widely used VPN appliance, the vendor said on Thursday. A patch is available. Researchers say more than 10,000 devices are exposed. Officials urged admins to update.</p><p>The post Critical flaw appeared first on Example News.</p>]]></description>
+      <link>https://news.example.com/2026/11/vpn-flaw?utm_source=rss&amp;utm_medium=feed#comments</link>
+      <guid isPermaLink="false">example-1001</guid>
+      <pubDate>Fri, 27 Nov 2026 10:30:00 GMT</pubDate>
+      <dc:creator>Jane Reporter</dc:creator>
+      <category>Vulnerability</category>
+      <media:thumbnail width="240" height="135" url="https://img.example.com/small.jpg"/>
+      <media:thumbnail width="976" height="549" url="https://img.example.com/large.jpg"/>
+    </item>
+    <item>
+      <title>Second item without an image</title>
+      <description>Short description.</description>
+      <link>https://news.example.com/2026/11/second</link>
+      <guid>https://news.example.com/2026/11/second</guid>
+      <pubDate>Fri, 27 Nov 2026 09:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Bad link item</title>
+      <description>Should be dropped.</description>
+      <link>javascript:alert(1)</link>
+      <guid>bad-1</guid>
+    </item>
+    <item>
+      <title></title>
+      <link>https://news.example.com/no-title</link>
+    </item>
+    <item>
+      <title>Item with an enclosure image</title>
+      <link>https://news.example.com/2026/11/enclosure</link>
+      <enclosure url="https://img.example.com/enclosure.png" type="image/png" length="1234"/>
+    </item>
+  </channel>
+</rss>

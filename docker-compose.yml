@@ -1,0 +1,63 @@
+# Production: deployed by .github/workflows/deploy.yml, which writes .env from GitHub secrets/variables.
+# Manual run (local testing only):
+#   cp .env.example .env   # fill it in
+#   docker compose up -d --build                    # bot + admin page on 127.0.0.1:8000
+#   docker compose --profile https up -d --build    # also serve the admin page over HTTPS at $DOMAIN
+#
+# Run only ONE copy of the bot: Telegram allows a single long-polling connection per token.
+# Bot, collector, sender and admin page run in one process (a modular monolith); see README.
+name: news-bot
+
+services:
+  bot:
+    build: .
+    image: news-bot:latest
+    container_name: news-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/news.db
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8000"
+    volumes:
+      - bot-data:/app/data
+    ports:
+      # Loopback only by default, so the admin page isn't exposed over plain HTTP.
+      # Reach it through an SSH tunnel, the Caddy service below, or set ADMIN_BIND=0.0.0.0.
+      - "${ADMIN_BIND:-127.0.0.1}:${ADMIN_PORT:-8000}:8000"
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional HTTPS reverse proxy with automatic Let's Encrypt certificates.
+  # Needs DOMAIN in .env and the domain's DNS pointing at this server (ports 80/443 open).
+  caddy:
+    image: caddy:2.8.4-alpine
+    container_name: news-bot-caddy
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - bot
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  bot-data:
+  caddy-data:
+  caddy-config:

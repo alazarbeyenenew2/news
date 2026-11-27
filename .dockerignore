@@ -1,0 +1,15 @@
+.venv/
+.env
+.env.*
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.github/
+tests/
+Caddyfile
+docker-compose.yml
+README.md
+backups/
+docs/

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>🗂 Topics</h2>
+  <p class="small muted">An article gets a topic when its confidence is at least <b>{{ threshold }}</b>. Evidence is combined: provider default, keywords in the headline (full weight), in the summary (60%) and in provider tags (80%). Keyword changes apply to new articles.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Topic</th><th>State</th><th>Followers</th><th>Keywords {"phrase": weight}</th><th></th></tr></thead>
+    <tbody>
+    {% for c in categories %}
+      <tr>
+        <td><b>{{ c.emoji }} {{ c.name_en }}</b><br><span class="muted small">{{ c.name_am }} · {{ c.key }}</span><br><span class="small muted">{{ c.description or "" }}</span></td>
+        <td>{% if c.is_active %}<span class="badge b-on">on</span>{% else %}<span class="badge b-off">off</span>{% endif %}</td>
+        <td>{{ followers.get(c.id, 0) }}</td>
+        <td style="min-width:320px">
+          <form method="post" action="/categories/{{ c.id }}/keywords" style="display:grid;gap:6px">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <textarea name="keywords" rows="4">{{ c.keywords | tojson_pretty }}</textarea>
+            <button type="submit">Save keywords</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="/categories/{{ c.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="{{ 'danger' if c.is_active else 'ok' }}" type="submit">{{ "Turn off" if c.is_active else "Turn on" }}</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+<div class="card">
+  <h2>➕ Add a topic</h2>
+  <form method="post" action="/categories" class="grid-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="key" placeholder="key, e.g. climate" required pattern="[a-z0-9_]{2,40}">
+    <input name="emoji" placeholder="Emoji" value="📰">
+    <input name="name_en" placeholder="English name" required>
+    <input name="name_am" placeholder="Amharic name">
+    <input name="keywords" placeholder='{"climate": 0.7}' value="{}">
+    <button class="primary" type="submit">Add</button>
+  </form>
+</div>
+{% endblock %}
