@@ -17,6 +17,7 @@ from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError, Re
 import config
 import metrics
 import texts
+from keyboards import align
 from db import Article, Category, Notification, User, db, now_utc, to_local
 
 log = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def format_alert(article: Article, provider_name: str, category: Category | None
     if category:
         rows.append([InlineKeyboardButton(L.mute_button(category.name(language)),
                                           callback_data=f"{MUTE_FROM_ALERT}{category.id}")])
-    return text, InlineKeyboardMarkup(rows)
+    return text, align(InlineKeyboardMarkup(rows))
 
 
 def _retry_after_seconds(e: RetryAfter) -> float:
@@ -117,6 +118,9 @@ class Sender:
 
     async def send_one(self, n: Notification) -> str:
         """Send one queued alert. Returns the new status."""
+        current = db.get_notification(n.id)
+        if not current or current.status != "queued":
+            return current.status if current else "gone"  # e.g. pulled with 📥 Latest news meanwhile
         user = db.get_user(n.user_id)
         article = db.get_article(n.article_id)
         if user and user.delivery_mode == "digest":

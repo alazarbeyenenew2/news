@@ -15,13 +15,13 @@ import httpx
 
 import config
 import metrics
-from db import Provider, db, now_utc
+from db import Provider, db, now_utc, parse_iso
 from netsafe import TooLarge, UnsafeURL, safe_get
 from news import Classifier, CategoryRule, RawArticle, RuleClassifier, find_similar, normalize, parse_feed
 
 log = logging.getLogger(__name__)
 
-LOOP_SECONDS = 30
+LOOP_SECONDS = 15  # how often due providers are looked for (each has its own polling interval)
 MAX_BACKOFF = timedelta(hours=6)
 
 
@@ -76,6 +76,7 @@ class Collector:
         self.on_queued = on_queued  # wakes the sender when alerts are queued
         self._wake = asyncio.Event()
         self._last_cleanup: datetime | None = None
+        self._in_flight: set[int] = set()  # providers being fetched right now
         self.last_loop_at: datetime | None = None
 
     def wake(self) -> None:
@@ -102,9 +103,21 @@ class Collector:
         """Fetch every due provider (a few at a time) and process the results one provider at a time.
         One provider failing never stops the others."""
         now = now or now_utc()
-        due = db.due_providers(now)
-        if not due:
+        return await self._fetch_all(db.due_providers(now), now)
+
+    async def refresh(self, provider_ids: set[int], stale_seconds: int = 60) -> dict:
+        """Fetch these providers now unless they were fetched in the last stale_seconds (used by
+        📥 Latest news so people see the newest stories without waiting for the next poll)."""
+        now = now_utc()
+        stale = [p for p in db.providers(enabled_only=True) if p.id in provider_ids
+                 and (not p.last_fetched_at or (now - parse_iso(p.last_fetched_at)).total_seconds() > stale_seconds)]
+        return await self._fetch_all(stale, now)
+
+    async def _fetch_all(self, providers: list[Provider], now: datetime) -> dict:
+        providers = [p for p in providers if p.id not in self._in_flight]  # already being fetched
+        if not providers:
             return {}
+        self._in_flight |= {p.id for p in providers}
         semaphore = asyncio.Semaphore(config.FETCH_CONCURRENCY)
 
         async def fetch(provider: Provider):
@@ -118,8 +131,11 @@ class Collector:
                     return provider, e
 
         summary = {}
-        for provider, result in await asyncio.gather(*(fetch(p) for p in due)):
-            summary[provider.key] = self._record(provider, result, now)
+        try:
+            for provider, result in await asyncio.gather(*(fetch(p) for p in providers)):
+                summary[provider.key] = self._record(provider, result, now)
+        finally:
+            self._in_flight -= {p.id for p in providers}
         return summary
 
     def _record(self, provider: Provider, result, now: datetime) -> dict:

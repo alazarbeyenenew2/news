@@ -22,7 +22,7 @@ To restore into an empty database (the bot stopped):
   1. Create the tables:   psql -f migrations/001_initial.sql   (every file in migrations/, in order)
   2. Load the tables in this order, each with:
        \\copy <table> FROM '<table>.csv' WITH (FORMAT csv, HEADER true)
-     categories, providers, users, user_interests, articles, article_categories, notifications, settings,
+     categories, providers, users, user_interests, user_source_exclusions, articles, article_categories, notifications, settings,
      schema_migrations
   3. Move the id counters past the loaded rows, for each of categories, providers, articles, notifications:
        SELECT setval(pg_get_serial_sequence('articles', 'id'), (SELECT COALESCE(MAX(id), 1) FROM articles));

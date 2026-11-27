@@ -62,6 +62,7 @@ def onboard(chat: Chat, user: int = USER, topics=("cybersecurity", "sports")):
     for t in topics:
         chat.tap(f"tp:o:{cid(t)}", user)
     chat.tap("tps:o", user)
+    chat.tap("srx:o", user)  # sources step: keep them all
     chat.tap("ob:instant", user)
 
 
@@ -94,7 +95,18 @@ def test_new_user_onboarding(chat):
     assert "Selected: 2" in api.last("editMessageText")["text"]
 
     api = chat.tap("tps:o")
+    step = api.last("editMessageText")
+    assert "Choose your news sources" in step["text"]
+    labels = [b["text"] for row in step["reply_markup"]["inline_keyboard"] for b in row]
+    assert any(t.startswith("✅ BBC Sport") for t in labels)          # covers Sports, on by default
+    assert any(t.startswith("✅ The Hacker News") for t in labels)    # covers Cybersecurity
+    assert not any("World Health" in t for t in labels)               # Health wasn't chosen
+    assert any(t.startswith(texts_en.SOURCES_NEXT) for t in labels)
+    assert any(t.startswith(texts_en.SOURCES_SKIP) for t in labels)
+
+    api = chat.tap("srs:o")  # ➡️ Next with the defaults
     assert "How should news reach you" in api.last("editMessageText")["text"]
+    assert db.source_exclusions(USER) == set()
     assert not db.get_user(USER).onboarding_completed
 
     api = chat.tap("ob:instant")
@@ -195,8 +207,10 @@ def test_delete_my_data(chat):
 
 def test_sources_and_help(chat):
     onboard(chat)
-    text = chat.send("/sources").last("sendMessage")["text"]
-    assert "BBC News" in text and "The Hacker News" in text and "Addis Standard" not in text  # disabled
+    message = chat.send("/sources").last("sendMessage")
+    labels = " ".join(b["text"] for row in message["reply_markup"]["inline_keyboard"] for b in row)
+    assert "News sources" in message["text"]
+    assert "BBC News" in labels and "The Hacker News" in labels and "Addis Standard" not in labels  # disabled
     assert "/interests" in chat.send("/help").last("sendMessage")["text"]
 
 
@@ -286,7 +300,8 @@ def test_pull_latest_news_pages_and_never_repeats(chat):
 
 
 def test_pull_skips_stories_already_received_and_takes_over_waiting_ones(chat):
-    from bot import pull_news  # noqa: F401  (handler is registered; imported for clarity)
+    from datetime import timedelta
+
     from db import now_utc
     onboard(chat, topics=("sports",))
     sport = next(p for p in db.providers() if p.key == "bbc_sport")
@@ -297,11 +312,16 @@ def test_pull_skips_stories_already_received_and_takes_over_waiting_ones(chat):
     db.execute("UPDATE notifications n SET status = 'sent' FROM articles a WHERE a.id = n.article_id AND a.title = %s",
                (first,))
 
+    # An alert due right now is left to the sender (which is about to send it), not pulled.
+    assert _alerts(chat.send(texts_en.BTN_PULL)) == []
+    # An alert waiting for a later retry is taken over by the pull.
+    db.execute("UPDATE notifications SET next_attempt_at = %s WHERE status = 'queued'",
+               ((now_utc() + timedelta(minutes=5)).isoformat(),))
     api = chat.send(texts_en.BTN_PULL)
     shown = _alerts(api)
     assert len(shown) == 1 and second in shown[0]  # the one already sent isn't repeated
     assert _statuses() == {first: "sent", second: "pulled"}
-    assert db.due_notifications() == []  # the waiting alert won't be sent a second time
+    assert db.execute("SELECT COUNT(*) AS n FROM notifications WHERE status = 'queued'").fetchone()["n"] == 0
 
 
 def test_pull_only_today_and_only_followed_unmuted_topics(chat):
@@ -348,3 +368,98 @@ def test_selection_lists_line_up_on_the_left(chat):
         assert all(t[0] in "✅⬜" for t in topics)
         assert len({_width(t) for t in topics}) == 1
         assert any(t.endswith(PAD) for t in topics) and not any(t.endswith(" ") for t in topics)
+
+
+def _rows(message) -> list[list[str]]:
+    return [[b["text"] for b in row] for row in message["reply_markup"]["inline_keyboard"]]
+
+
+def test_every_menu_lines_up(chat):
+    """Settings, digest, sources and admin menus: buttons in rows of the same size share one width."""
+    from bot import _width
+    onboard(chat, SUPER)
+    screens = [chat.send("/settings", SUPER).last("sendMessage"), chat.send("/digest", SUPER).last("sendMessage"),
+               chat.send("/sources", SUPER).last("sendMessage"), chat.send("/admin", SUPER).last("sendMessage"),
+               chat.tap("st:limit", SUPER).last("editMessageText")]
+    for message in screens:
+        by_size: dict[int, set] = {}
+        for row in _rows(message):
+            for label in row:
+                if label.strip():
+                    by_size.setdefault(len(row), set()).add(_width(label))
+        assert all(len(widths) == 1 for widths in by_size.values()), (message["text"][:30], by_size)
+    settings_rows = _rows(screens[0])
+    assert all(len(row) == 1 for row in settings_rows)  # one column: long labels never get cut off
+
+
+# ---------- 📚 Sources ----------
+def test_sources_can_be_switched_off(chat):
+    onboard(chat, topics=("sports", "cybersecurity"))
+    chat.send("/sources")
+    bbc_sport = min(p.id for p in db.providers() if p.name == "BBC Sport")
+    chat.tap(f"sr:s:{bbc_sport}")
+    api = chat.tap("srs:s")
+    assert "Sources saved" in api.last("editMessageText")["text"]
+    assert bbc_sport in db.source_exclusions(USER)
+
+    # Alerts and 📥 Latest news both leave out BBC Sport now.
+    _stories("bbc_sport", "s", SPORTS[:2])
+    _stories("thehackernews", "c", ["Ransomware gang hits hospital network"])
+    shown = _alerts(chat.send(texts_en.BTN_PULL))
+    assert len(shown) == 1 and "Ransomware" in shown[0]
+
+    # Turning everything off is refused; cancel leaves things as they were.
+    chat.send("/sources")
+    api = chat.tap("srn:s")
+    api = chat.tap("srs:s")
+    assert texts_en.SOURCES_NEED_ONE in api.last("answerCallbackQuery")["text"]
+    chat.tap("srx:s")
+    assert db.source_exclusions(USER) == {bbc_sport}
+
+
+def test_onboarding_source_choice_and_skip(chat):
+    chat.send("/start")
+    chat.tap("lang:en")
+    chat.tap(f"tp:o:{cid('cybersecurity')}")
+    chat.tap("tps:o")
+    hacker_news = next(p.id for p in db.providers() if p.key == "thehackernews")
+    chat.tap(f"sr:o:{hacker_news}")
+    api = chat.tap("srs:o")
+    assert "How should news reach you" in api.last("editMessageText")["text"]
+    assert db.source_exclusions(USER) == {hacker_news}
+    chat.tap("ob:instant")
+    assert db.get_user(USER).onboarding_completed
+    # Skip in onboarding means every source on.
+    db.update_user(USER, onboarding_completed=False)
+    chat.send("/start")
+    chat.tap("tps:o")
+    chat.tap("srx:o")
+    assert db.source_exclusions(USER) == set()
+
+
+def test_latest_news_checks_the_sources_first(chat):
+    """📥 Latest news fetches the user's sources that weren't checked in the last minute, then shows
+    what it found, so the newest stories come straight away."""
+    from collector import Collector, FetchResult
+    from db import now_utc
+    from news import RawArticle
+    fetched = []
+
+    class Feed:
+        async def fetch(self, provider):
+            fetched.append(provider.key)
+            if provider.key != "bbc_sport":
+                return FetchResult()
+            return FetchResult(items=[RawArticle("brand-new", "Champions League final goes to penalties", "",
+                                                 "https://example.com/new", published_at=now_utc())])
+
+    onboard(chat, topics=("sports",))
+    chat.app.bot_data["collector"] = Collector(adapters={"rss": Feed()})
+    api = chat.send(texts_en.BTN_PULL)
+    assert "sendChatAction" in api.methods()
+    assert "bbc_sport" in fetched and "thehackernews" not in fetched  # only sources for their topics
+    shown = _alerts(api)
+    assert len(shown) == 1 and "Champions League final" in shown[0]
+    fetched.clear()
+    chat.send(texts_en.BTN_PULL)
+    assert fetched == []  # checked less than a minute ago: not fetched again

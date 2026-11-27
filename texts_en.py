@@ -192,13 +192,29 @@ def format_time(dt) -> str:
 
 
 # ---------- sources ----------
-def sources_text(lines: list[str]) -> str:
-    return (f"📚 <b>News sources</b>\n{LINE}\n" + "\n".join(lines)
-            + "\n\n<i>We send headlines and short descriptions from the providers' own feeds. "
-              "Read the full story on the provider's website.</i>")
-
-
+SOURCES_PROMPT = ("📚 <b>Choose your news sources</b>\n"
+                  "These cover the topics you picked. All are on: tap one to turn it off, then <b>➡️ Next</b>. "
+                  "Or <b>⏭ Skip</b> to keep them all.")
+SOURCES_MANAGE = ("📚 <b>News sources</b>\n"
+                  "Tap a source to turn it on (✅) or off (⬜), then <b>💾 Save</b>. New sources start on.\n"
+                  "<i>We send headlines and short descriptions from each provider's own feed; read the full "
+                  "story on their website.</i>")
+SOURCES_NEXT = "➡️ Next"
+SOURCES_SKIP = "⏭ Skip (all sources)"
+SOURCES_NEED_ONE = "Keep at least one source on."
+SOURCES_UNCHANGED = "No changes."
 SOURCES_EMPTY = "No sources are active right now."
+SOURCE_GONE = "That source isn't available any more."
+SET_SOURCES = "📚 Sources"
+
+
+def sources_on(on: int, total: int) -> str:
+    return f"\n\n<i>On: {on} of {total}</i>"
+
+
+def sources_saved(on: int, total: int) -> str:
+    return f"✅ <b>Sources saved.</b>\nGetting news from {on} of {total} sources."
+
 
 # ---------- help ----------
 HELP = (f"❓ <b>How {BOT} works</b>\n{LINE}\n"

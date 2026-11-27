@@ -432,6 +432,21 @@ class Database:
             (bool(enabled), _now(), user_id, category_id))
         return cur.rowcount > 0
 
+    # ---------- the user's sources ----------
+    def source_exclusions(self, user_id: int) -> set[int]:
+        """Provider ids the user switched off."""
+        rows = self.execute("SELECT provider_id FROM user_source_exclusions WHERE user_id = %s", (user_id,))
+        return {r["provider_id"] for r in rows}
+
+    def set_source_exclusions(self, user_id: int, provider_ids: set[int]) -> None:
+        """Make the user's switched-off sources exactly these (unknown ids are ignored)."""
+        valid = {p.id for p in self.providers()}
+        now = _now()
+        with self.transaction():
+            self.execute("DELETE FROM user_source_exclusions WHERE user_id = %s", (user_id,))
+            for pid in set(provider_ids) & valid:
+                self.execute("INSERT INTO user_source_exclusions VALUES (%s, %s, %s)", (user_id, pid, now))
+
     # ---------- providers ----------
     def providers(self, enabled_only: bool = False) -> list[Provider]:
         where = "WHERE is_enabled" if enabled_only else ""
@@ -577,7 +592,10 @@ class Database:
             JOIN categories c ON c.id = ac.category_id AND c.is_active
             JOIN user_interests i ON i.category_id = ac.category_id AND i.is_enabled
             JOIN users u ON u.telegram_id = i.user_id
+            JOIN articles a ON a.id = ac.article_id
             WHERE ac.article_id = %s AND ac.confidence >= %s
+              AND NOT EXISTS (SELECT 1 FROM user_source_exclusions x
+                              WHERE x.user_id = i.user_id AND x.provider_id = a.provider_id)
               AND u.status = 'active' AND u.notifications_enabled AND u.onboarding_completed
               AND (u.news_language = 'any' OR u.news_language = %s)
               AND i.created_at <= %s
@@ -635,23 +653,29 @@ class Database:
                 JOIN user_interests i ON i.category_id = ac.category_id AND i.user_id = %(user)s AND i.is_enabled
                 WHERE COALESCE(a.published_at, a.fetched_at) >= %(since)s
                   AND (%(language)s = 'any' OR a.language = %(language)s)
+                  AND NOT EXISTS (SELECT 1 FROM user_source_exclusions x
+                                  WHERE x.user_id = %(user)s AND x.provider_id = a.provider_id)
+                  -- Not already received, and not an alert the sender is about to deliver.
                   AND NOT EXISTS (SELECT 1 FROM notifications n
-                                  WHERE n.user_id = %(user)s AND n.status IN ('sent', 'pulled')
-                                    AND n.cluster_id = COALESCE(a.story_cluster_id, a.id))
+                                  WHERE n.user_id = %(user)s
+                                    AND n.cluster_id = COALESCE(a.story_cluster_id, a.id)
+                                    AND (n.status IN ('sent', 'pulled')
+                                         OR (n.status = 'queued' AND n.next_attempt_at <= %(now)s)))
                 ORDER BY COALESCE(a.story_cluster_id, a.id), ac.confidence DESC, a.id DESC
             )
             SELECT *, COUNT(*) OVER () AS total FROM eligible
             ORDER BY COALESCE(published_at, fetched_at) DESC, id DESC LIMIT %(limit)s
             """,
-            {"threshold": config.CLASSIFY_MIN_CONFIDENCE, "user": user.telegram_id, "since": since,
+            {"threshold": config.CLASSIFY_MIN_CONFIDENCE, "user": user.telegram_id, "since": since, "now": _now(),
              "language": user.news_language, "limit": limit}).fetchall()
         total = rows[0]["total"] if rows else 0
         return [(_row(Article, r), r["pull_category_id"]) for r in rows], total
 
     def claim_pulled(self, user_id: int, article: Article, category_id: int | None) -> bool:
         """Record that the user is getting this story now, before it's sent, so a second tap (or the
-        sender) can't send it again. A waiting, held, skipped or failed alert for the story becomes the
-        pulled one. Returns False if they already have it."""
+        sender) can't send it again. A held, skipped, failed or later-retry alert for the story becomes the
+        pulled one; an alert the sender is due to send now is left to the sender. Returns False if the
+        user already has the story (or is about to get it as an alert)."""
         now = _now()
         with self.transaction():
             cur = self.execute(
@@ -663,8 +687,9 @@ class Database:
                 return True
             cur = self.execute(
                 """UPDATE notifications SET status = 'pulled', sent_at = %s, last_error = NULL, updated_at = %s
-                   WHERE user_id = %s AND cluster_id = %s AND status NOT IN ('sent', 'pulled')""",
-                (now, now, user_id, article.cluster_id))
+                   WHERE user_id = %s AND cluster_id = %s AND status NOT IN ('sent', 'pulled')
+                     AND NOT (status = 'queued' AND next_attempt_at <= %s)""",
+                (now, now, user_id, article.cluster_id, now))
             return cur.rowcount > 0
 
     def unclaim_pulled(self, user_id: int, article: Article, error: str) -> None:
@@ -790,8 +815,8 @@ class Database:
                      " ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
 
     # ---------- backup ----------
-    BACKUP_TABLES = ("categories", "providers", "users", "user_interests", "articles", "article_categories",
-                     "notifications", "settings", "schema_migrations")
+    BACKUP_TABLES = ("categories", "providers", "users", "user_interests", "user_source_exclusions", "articles",
+                     "article_categories", "notifications", "settings", "schema_migrations")
 
     def export_table_csv(self, table: str) -> bytes:
         """One table as CSV with a header (restorable with COPY … FROM … CSV HEADER)."""

@@ -192,13 +192,28 @@ def format_time(dt) -> str:
 
 
 # ---------- sources ----------
-def sources_text(lines: list[str]) -> str:
-    return (f"📚 <b>የዜና ምንጮች</b>\n{LINE}\n" + "\n".join(lines)
-            + "\n\n<i>ከምንጮቹ የራሳቸው መጋቢ (feed) ርዕስና አጭር መግለጫ እንልካለን። "
-              "ሙሉውን ዜና በምንጩ ድረ-ገጽ ላይ ያንብቡ።</i>")
-
-
+SOURCES_PROMPT = ("📚 <b>የዜና ምንጮችዎን ይምረጡ</b>\n"
+                  "እነዚህ የመረጧቸውን ርዕሶች ይሸፍናሉ። ሁሉም በርተዋል፤ ለማጥፋት ይንኩ፣ ከዚያ <b>➡️ ቀጥል</b>ን ይጫኑ። "
+                  "ወይም ሁሉንም ለማቆየት <b>⏭ እለፍ</b>ን ይንኩ።")
+SOURCES_MANAGE = ("📚 <b>የዜና ምንጮች</b>\n"
+                  "ምንጩን ለማብራት (✅) ወይም ለማጥፋት (⬜) ይንኩ፣ ከዚያ <b>💾 አስቀምጥ</b>ን ይጫኑ። አዳዲስ ምንጮች በርተው ይጀምራሉ።\n"
+                  "<i>ከእያንዳንዱ ምንጭ የራሱ መጋቢ ርዕስና አጭር መግለጫ እንልካለን፤ ሙሉውን ዜና በድረ-ገጻቸው ያንብቡ።</i>")
+SOURCES_NEXT = "➡️ ቀጥል"
+SOURCES_SKIP = "⏭ እለፍ (ሁሉም ምንጮች)"
+SOURCES_NEED_ONE = "ቢያንስ አንድ ምንጭ ይተዉ።"
+SOURCES_UNCHANGED = "ምንም አልተቀየረም።"
 SOURCES_EMPTY = "አሁን የሚሠሩ ምንጮች የሉም።"
+SOURCE_GONE = "ይህ ምንጭ ከአሁን በኋላ የለም።"
+SET_SOURCES = "📚 ምንጮች"
+
+
+def sources_on(on: int, total: int) -> str:
+    return f"\n\n<i>የበሩ፦ {on} ከ{total}</i>"
+
+
+def sources_saved(on: int, total: int) -> str:
+    return f"✅ <b>ምንጮች ተቀምጠዋል።</b>\nዜና ከ{on} ምንጮች ይመጣል (ከ{total})።"
+
 
 # ---------- help ----------
 HELP = (f"❓ <b>{BOT} እንዴት ይሠራል</b>\n{LINE}\n"

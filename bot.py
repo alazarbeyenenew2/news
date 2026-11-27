@@ -6,7 +6,6 @@ Telegram lives in texts_am.py / texts_en.py; each person sees their own language
 import asyncio
 import html
 import logging
-import unicodedata
 from datetime import datetime
 
 from telegram import (
@@ -20,7 +19,7 @@ from telegram import (
     ReplyKeyboardRemove,
     Update,
 )
-from telegram.constants import ChatMemberStatus, ParseMode
+from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
 from telegram.error import RetryAfter, TelegramError
 from telegram.ext import (
     Application,
@@ -38,6 +37,8 @@ import texts
 import metrics
 from db import User, day_start_utc, db, local_today, now_utc, parse_iso, to_local
 from delivery import MUTE_FROM_ALERT, send_alert
+from keyboards import PAD, align
+from keyboards import width as _width  # noqa: F401  (used by tests)
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +50,11 @@ TOPIC_NONE = "tpn:"      # tpn:<o|i>
 TOPIC_SAVE = "tps:"      # tps:<o|i>
 TOPIC_SKIP = "tpx:"      # tpx:<o|i>   skip (onboarding) or cancel (/interests)
 ONBOARD_DELIVERY = "ob:"  # ob:<instant|digest>
+SOURCE = "sr:"           # sr:<o|s>:<provider_id>   o = onboarding, s = 📚 Sources / settings
+SOURCE_ALL = "sra:"      # sra:<o|s>
+SOURCE_NONE = "srn:"     # srn:<o|s>
+SOURCE_SAVE = "srs:"     # srs:<o|s>   ➡️ Next (onboarding) or 💾 Save
+SOURCE_SKIP = "srx:"     # srx:<o|s>   skip with every source on (onboarding) or cancel
 SETTINGS = "st:"         # st:<screen or action>[:<value>]
 DIGEST = "dg:"           # dg:<instant|digest> | dg:h:<hour>
 ADMIN = "ad:"            # ad:<action>[:<id>][:<page>]
@@ -56,6 +62,7 @@ BACKUP = "bk:"           # bk:now | bk:on | bk:off
 PULL_MORE = "pull:more"  # the "more" button under a 📥 Latest news batch
 NOOP = "noop"
 PULL_PAGE = 5  # stories per 📥 Latest news tap
+PULL_REFRESH_SECONDS = 12  # how long 📥 Latest news waits for the feeds it re-checks
 
 DIGEST_HOURS = (6, 7, 8, 9, 12, 13, 18, 20, 21)
 DAILY_LIMITS = (10, 20, 30, 50, 100, 0)
@@ -71,28 +78,9 @@ def _button(text: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text, callback_data=data)
 
 
-PAD = "⠀"  # Braille blank: invisible, and Telegram doesn't trim it like spaces
-
-
-def _width(text: str) -> int:
-    """Roughly how wide text looks: emoji and wide characters count 2, joiners and accents 0."""
-    width = 0
-    for i, ch in enumerate(text):
-        if unicodedata.category(ch) in ("Mn", "Me", "Cf") or "\ufe00" <= ch <= "\ufe0f":
-            continue
-        if "\U0001f1e6" <= ch <= "\U0001f1ff":  # a flag is two of these, shown as one emoji
-            width += 1
-            continue
-        emoji_style = (i + 1 < len(text) and text[i + 1] == "\ufe0f") or ch >= "\U0001f000"
-        width += 2 if emoji_style or unicodedata.east_asian_width(ch) in ("W", "F") else 1
-    return width
-
-
 def _column(items: list[tuple[str, str]]) -> list[list[InlineKeyboardButton]]:
-    """One button per row with the text lined up on the left. Telegram centres button text, so every
-    label is padded to the same width with an invisible character (as in the report bot's users list)."""
-    width = max((_width(label) for label, _ in items), default=0)
-    return [[_button(label + PAD * (width - _width(label)), data)] for label, data in items]
+    """One button per row. (Every keyboard is lined up on the left by keyboards.align when it's sent.)"""
+    return [[_button(label, data)] for label, data in items]
 
 
 def _pairs(buttons: list, size: int = 2) -> list[list]:
@@ -146,18 +134,18 @@ async def _show(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str,
     query = update.callback_query
     if query:
         try:
-            await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard,
+            await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=align(keyboard),
                                           disable_web_page_preview=True)
             return
         except TelegramError as e:
             if "not modified" in str(e).lower():
                 return
     await context.bot.send_message(update.effective_chat.id, text, parse_mode=ParseMode.HTML,
-                                   reply_markup=keyboard, disable_web_page_preview=True)
+                                   reply_markup=align(keyboard), disable_web_page_preview=True)
 
 
 async def _send(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, reply_markup=None) -> None:
-    await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=reply_markup,
+    await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=align(reply_markup),
                                    disable_web_page_preview=True)
 
 
@@ -321,12 +309,139 @@ async def topic_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     context.user_data.pop("topics_draft", None)
     log.info("User %s saved %s topics", user.telegram_id, len(draft))
     if mode == "o":
-        keyboard = InlineKeyboardMarkup([[_button(L.DELIVERY_INSTANT, f"{ONBOARD_DELIVERY}instant")],
-                                         [_button(L.DELIVERY_DIGEST, f"{ONBOARD_DELIVERY}digest")]])
-        await _show(update, context, L.DELIVERY_PROMPT, keyboard)
+        if _source_groups(user, "o"):
+            await _show_sources(update, context, user, "o", fresh=True)
+        else:
+            await _show_delivery_step(update, context, user)
         return
     user = db.update_user(user.telegram_id, onboarding_completed=True)
     await _show(update, context, L.interests_saved(_topic_names(user)) if draft else L.INTERESTS_EMPTY, None)
+
+
+async def _show_delivery_step(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
+    L = tr(user)
+    keyboard = InlineKeyboardMarkup(_column([(L.DELIVERY_INSTANT, f"{ONBOARD_DELIVERY}instant"),
+                                             (L.DELIVERY_DIGEST, f"{ONBOARD_DELIVERY}digest")]))
+    await _show(update, context, L.DELIVERY_PROMPT, keyboard)
+
+
+# ---------- news sources (onboarding step, 📚 Sources, settings) ----------
+def _source_groups(user: User, mode: str) -> list[dict]:
+    """Enabled providers grouped by the name people see (BBC News has several feeds), each with the user's
+    topics it covers. Onboarding shows only sources covering the topics just chosen; 📚 Sources shows them
+    all, those covering the user's topics first. The group's id is its lowest provider id."""
+    followed = db.interests(user.telegram_id)
+    categories = {c.key: c for c in db.categories()}
+    groups: dict[str, dict] = {}
+    for p in db.providers(enabled_only=True):
+        g = groups.setdefault(p.name, {"name": p.name, "ids": set(), "topics": []})
+        g["ids"].add(p.id)
+        for key in p.categories:
+            c = categories.get(key)
+            if c and c.id in followed and c not in g["topics"]:
+                g["topics"].append(c)
+    for g in groups.values():
+        g["id"] = min(g["ids"])
+    result = [g for g in groups.values() if g["topics"] or mode != "o"]
+    return sorted(result, key=lambda g: (not g["topics"], g["name"].casefold()))
+
+
+def _sources_off(context: ContextTypes.DEFAULT_TYPE, user: User, groups: list[dict], fresh: bool = False) -> set[int]:
+    """Group ids switched off in the selection being edited (starts from what's saved)."""
+    if fresh or "sources_off" not in context.user_data:
+        excluded = db.source_exclusions(user.telegram_id)
+        context.user_data["sources_off"] = {g["id"] for g in groups if g["ids"] <= excluded}
+    return context.user_data["sources_off"]
+
+
+async def _show_sources(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, mode: str,
+                        fresh: bool = False, new_message: bool = False) -> None:
+    L = tr(user)
+    groups = _source_groups(user, mode)
+    if not groups:
+        await _send(context, update.effective_chat.id, L.SOURCES_EMPTY, main_keyboard(user))
+        return
+    off = _sources_off(context, user, groups, fresh)
+    rows = _column([(("⬜ " if g["id"] in off else "✅ ") + g["name"]
+                     + (" · " + "".join(c.emoji for c in g["topics"]) if g["topics"] else ""),
+                     f"{SOURCE}{mode}:{g['id']}") for g in groups])
+    rows.append([_button(L.TOPIC_ALL, f"{SOURCE_ALL}{mode}"), _button(L.TOPIC_NONE, f"{SOURCE_NONE}{mode}")])
+    rows.append([_button(L.SOURCES_NEXT if mode == "o" else L.TOPIC_SAVE, f"{SOURCE_SAVE}{mode}"),
+                 _button(L.SOURCES_SKIP if mode == "o" else L.TOPIC_CANCEL, f"{SOURCE_SKIP}{mode}")])
+    on = sum(1 for g in groups if g["id"] not in off)
+    text = (L.SOURCES_PROMPT if mode == "o" else L.SOURCES_MANAGE) + L.sources_on(on, len(groups))
+    if new_message:
+        await _send(context, update.effective_chat.id, text, InlineKeyboardMarkup(rows))
+    else:
+        await _show(update, context, text, InlineKeyboardMarkup(rows))
+
+
+async def sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """📚 Sources or /sources: choose which news sources to get stories from."""
+    user = await _active_user(update, context)
+    if user:
+        await _show_sources(update, context, user, "s", fresh=True, new_message=not update.callback_query)
+
+
+async def source_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """sr:/sra:/srn: switch sources on or off in the picker."""
+    query = update.callback_query
+    user = await _active_user(update, context)
+    if not user:
+        return
+    L = tr(user)
+    prefix, rest = query.data.split(":", 1)
+    mode = rest[0]
+    groups = _source_groups(user, mode)
+    off = _sources_off(context, user, groups)
+    ids = {g["id"] for g in groups}
+    warning = None
+    if prefix == "srn":
+        off |= ids
+    elif prefix == "sra":
+        off.clear()
+    else:
+        group_id = int(rest.split(":")[1])
+        if group_id in ids:
+            off.symmetric_difference_update({group_id})
+        else:
+            warning = L.SOURCE_GONE
+    off &= ids
+    await query.answer(warning, show_alert=bool(warning))
+    await _show_sources(update, context, user, mode)
+
+
+async def source_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """srs: save (➡️ Next in onboarding); srx: skip with every source on (onboarding) or cancel."""
+    query = update.callback_query
+    user = await _active_user(update, context)
+    if not user:
+        return
+    L = tr(user)
+    prefix, mode = query.data.split(":", 1)
+    groups = _source_groups(user, mode)
+    off = _sources_off(context, user, groups) & {g["id"] for g in groups}
+    if prefix == "srx" and mode == "s":
+        await query.answer()
+        context.user_data.pop("sources_off", None)
+        await _show(update, context, L.SOURCES_UNCHANGED, None)
+        return
+    if prefix == "srx":
+        off = set()  # skip: every source on
+    if groups and len(off) == len(groups):
+        await query.answer(L.SOURCES_NEED_ONE, show_alert=True)
+        return
+    await query.answer()
+    shown = set().union(*(g["ids"] for g in groups)) if groups else set()
+    switched_off = set().union(*(g["ids"] for g in groups if g["id"] in off)) if off else set()
+    # Sources not on this screen keep their saved state.
+    db.set_source_exclusions(user.telegram_id, (db.source_exclusions(user.telegram_id) - shown) | switched_off)
+    context.user_data.pop("sources_off", None)
+    log.info("User %s chose sources: %s of %s on", user.telegram_id, len(groups) - len(off), len(groups))
+    if mode == "o":
+        await _show_delivery_step(update, context, user)
+    else:
+        await _show(update, context, L.sources_saved(len(groups) - len(off), len(groups)), None)
 
 
 async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -408,21 +523,24 @@ def _settings_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
         L.NEWS_LANGUAGES.get(user.news_language, user.news_language),
         len(interests_), sum(1 for on in interests_.values() if not on),
     )
-    rows = [
-        [_button(L.SET_PAUSE if user.notifications_enabled else L.SET_RESUME,
-                 f"{SETTINGS}{'pause' if user.notifications_enabled else 'resume'}"),
-         _button(L.SET_TO_DIGEST if instant else L.SET_TO_INSTANT,
-                 f"{SETTINGS}mode:{'digest' if instant else 'instant'}")],
-        [_button(L.SET_HOUR, f"{SETTINGS}hour"), _button(L.SET_LIMIT, f"{SETTINGS}limit")],
-        [_button(L.SET_NEWS_LANGUAGE, f"{SETTINGS}nl"), _button(L.SET_MUTE, f"{SETTINGS}mute")],
-        [_button(L.SET_TOPICS, f"{SETTINGS}topics"), _button(L.SET_DELETE, f"{SETTINGS}del")],
-        [_button(L.CLOSE, f"{SETTINGS}close")],
-    ]
+    rows = _column([
+        (L.SET_PAUSE if user.notifications_enabled else L.SET_RESUME,
+         f"{SETTINGS}{'pause' if user.notifications_enabled else 'resume'}"),
+        (L.SET_TO_DIGEST if instant else L.SET_TO_INSTANT, f"{SETTINGS}mode:{'digest' if instant else 'instant'}"),
+        (L.SET_HOUR, f"{SETTINGS}hour"),
+        (L.SET_LIMIT, f"{SETTINGS}limit"),
+        (L.SET_NEWS_LANGUAGE, f"{SETTINGS}nl"),
+        (L.SET_TOPICS, f"{SETTINGS}topics"),
+        (L.SET_SOURCES, f"{SETTINGS}sources"),
+        (L.SET_MUTE, f"{SETTINGS}mute"),
+        (L.SET_DELETE, f"{SETTINGS}del"),
+        (L.CLOSE, f"{SETTINGS}close"),
+    ])
     return text, InlineKeyboardMarkup(rows)
 
 
 def _mark(selected: bool, label: str) -> str:
-    return ("• " if selected else "") + label
+    return ("✅ " if selected else "⬜ ") + label
 
 
 async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -455,6 +573,10 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if action == "topics":
         await interests(update, context)
         return
+    if action == "sources":
+        await query.answer()
+        await _show_sources(update, context, user, "s", fresh=True)
+        return
     if action in ("pause", "resume"):
         user = _set_paused(user, action == "pause")
         await query.answer()
@@ -480,7 +602,7 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         else:
             await query.answer()
             rows = _pairs([_button(_mark(n == user.max_per_day, L.limit_text(n)), f"{SETTINGS}limit:{n}")
-                           for n in DAILY_LIMITS], 3)
+                           for n in DAILY_LIMITS], 2)
             await _show(update, context, L.LIMIT_PROMPT, InlineKeyboardMarkup(rows + [back]))
             return
     elif action == "nl":
@@ -550,9 +672,10 @@ def _set_mode(user: User, mode: str) -> User:
 def _digest_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
     instant = user.delivery_mode == "instant"
-    rows = [[_button(_mark(instant, L.DELIVERY_INSTANT), f"{DIGEST}instant"),
-             _button(_mark(not instant, L.DELIVERY_DIGEST), f"{DIGEST}digest")]]
-    rows += _pairs([_button(_mark(not instant and h == user.digest_hour, f"🕗 {h:02d}:00"), f"{DIGEST}h:{h}")
+    rows = _column([(_mark(instant, L.DELIVERY_INSTANT), f"{DIGEST}instant"),
+                    (_mark(not instant, L.DELIVERY_DIGEST), f"{DIGEST}digest")])
+    rows += _pairs([_button(("✅ " if not instant and h == user.digest_hour else "") + f"🕗 {h:02d}:00",
+                            f"{DIGEST}h:{h}")
                     for h in DIGEST_HOURS], 3)
     return L.digest_menu(instant, user.digest_hour), InlineKeyboardMarkup(rows)
 
@@ -620,6 +743,8 @@ async def pull_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return  # a pull for this user is already sending
     context.user_data["pulling"] = True
     try:
+        if not query:  # a fresh tap (not "more"): first check the user's sources for brand-new stories
+            await _refresh_sources(context, user, chat_id)
         items, total = db.pull_candidates(user, day_start_utc(local_today()), PULL_PAGE)
         if not items:
             await _send(context, chat_id, L.PULL_NOTHING, main_keyboard(user))
@@ -647,26 +772,31 @@ async def pull_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context.user_data.pop("pulling", None)
 
 
-# ---------- sources / help ----------
-async def sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = await _active_user(update, context)
-    if not user:
+async def _refresh_sources(context: ContextTypes.DEFAULT_TYPE, user: User, chat_id: int) -> None:
+    """Fetch the user's sources (those covering their topics, minus any they switched off) that weren't
+    checked in the last minute, waiting up to PULL_REFRESH_SECONDS. A slow feed keeps going in the
+    background and its stories arrive as alerts."""
+    collector = context.application.bot_data.get("collector")
+    if not collector:
         return
-    L = tr(user)
-    categories = {c.key: c for c in db.categories()}
-    grouped: dict[str, dict] = {}
-    for p in db.providers(enabled_only=True):
-        entry = grouped.setdefault(p.name, {"url": p.base_url, "topics": []})
-        for key in p.categories:
-            if key in categories and categories[key].label(user.language) not in entry["topics"]:
-                entry["topics"].append(categories[key].label(user.language))
-    lines = [f"• <a href=\"{html.escape(e['url'], quote=True)}\">{html.escape(name)}</a>"
-             + (f" — {', '.join(e['topics'])}" if e["topics"] else "")
-             for name, e in sorted(grouped.items())]
-    await _send(context, update.effective_chat.id, L.sources_text(lines) if lines else L.SOURCES_EMPTY,
-                main_keyboard(user))
+    excluded = db.source_exclusions(user.telegram_id)
+    ids = {pid for g in _source_groups(user, "o") for pid in g["ids"]} - excluded
+    if not ids:
+        return
+    try:
+        await context.bot.send_chat_action(chat_id, ChatAction.TYPING)
+    except TelegramError:
+        pass
+    task = asyncio.ensure_future(collector.refresh(ids))
+    try:
+        await asyncio.wait_for(asyncio.shield(task), PULL_REFRESH_SECONDS)
+    except asyncio.TimeoutError:
+        log.info("Latest news for %s: some feeds still loading after %ss", user.telegram_id, PULL_REFRESH_SECONDS)
+    except Exception:
+        log.exception("Refreshing sources for %s failed", user.telegram_id)
 
 
+# ---------- sources / help ----------
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = await _active_user(update, context)
     if user:
@@ -716,9 +846,9 @@ def _admin_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     if stats["queue_oldest"]:
         age = max(0, int((now_utc() - parse_iso(stats["queue_oldest"])).total_seconds()))
         stats["queue_age"] = f"{age // 60} min" if age >= 60 else f"{age} s"
-    rows = [[_button(L.ADMIN_PROVIDERS, f"{ADMIN}prov:0"), _button(L.ADMIN_CATEGORIES, f"{ADMIN}cat")],
-            [_button(f"{L.ADMIN_FAILED} ({stats['failed_today']})", f"{ADMIN}fail"),
-             _button(L.ADMIN_REFRESH, f"{ADMIN}menu")]]
+    rows = _column([(L.ADMIN_PROVIDERS, f"{ADMIN}prov:0"), (L.ADMIN_CATEGORIES, f"{ADMIN}cat"),
+                    (f"{L.ADMIN_FAILED} ({stats['failed_today']})", f"{ADMIN}fail"),
+                    (L.ADMIN_REFRESH, f"{ADMIN}menu")])
     return L.admin_status(stats, web_hint=True), InlineKeyboardMarkup(rows)
 
 
@@ -761,9 +891,9 @@ def _provider_card(user: User, provider_id: int, page: int) -> tuple[str, Inline
                            p.polling_interval_seconds, _ago(p.last_success_at, L),
                            html.escape(p.last_error or L.NONE), p.articles_total, topics,
                            html.escape(p.notes or ""))
-    rows = [[_button(L.ADMIN_DISABLE if p.is_enabled else L.ADMIN_ENABLE, f"{ADMIN}pt:{p.id}:{page}"),
-             _button(L.ADMIN_FETCH_NOW, f"{ADMIN}pf:{p.id}:{page}")],
-            [_button(L.BACK, f"{ADMIN}prov:{page}")]]
+    rows = _column([(L.ADMIN_DISABLE if p.is_enabled else L.ADMIN_ENABLE, f"{ADMIN}pt:{p.id}:{page}"),
+                    (L.ADMIN_FETCH_NOW, f"{ADMIN}pf:{p.id}:{page}"),
+                    (L.BACK, f"{ADMIN}prov:{page}")])
     return text, InlineKeyboardMarkup(rows)
 
 
@@ -965,6 +1095,8 @@ def build_application(request=None) -> Application:
     app.add_handler(CallbackQueryHandler(topic_save, pattern=rf"^{TOPIC_SAVE}[oi]$"))
     app.add_handler(CallbackQueryHandler(topic_skip, pattern=rf"^{TOPIC_SKIP}[oi]$"))
     app.add_handler(CallbackQueryHandler(onboarding_delivery, pattern=rf"^{ONBOARD_DELIVERY}(instant|digest)$"))
+    app.add_handler(CallbackQueryHandler(source_tap, pattern=rf"^({SOURCE}[os]:\d+|{SOURCE_ALL}[os]|{SOURCE_NONE}[os])$"))
+    app.add_handler(CallbackQueryHandler(source_save, pattern=rf"^({SOURCE_SAVE}|{SOURCE_SKIP})[os]$"))
     app.add_handler(CallbackQueryHandler(settings_action, pattern=rf"^{SETTINGS}[a-z]+(:[a-z0-9]+)?$"))
     app.add_handler(CallbackQueryHandler(digest_action, pattern=rf"^{DIGEST}(instant|digest|h:\d+)$"))
     app.add_handler(CallbackQueryHandler(mute_from_alert, pattern=rf"^{MUTE_FROM_ALERT}\d+$"))
