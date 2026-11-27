@@ -41,7 +41,7 @@ import texts
 import metrics
 from db import (CVE_MIN_SEVERITIES, User, day_start_utc, db, load_technologies, local_today, now_utc, parse_iso,
                 to_local)
-from delivery import CVE_MENU, MUTE_FROM_ALERT, Digester, send_alert
+from delivery import CVE_MENU, MUTE_FROM_ALERT, send_alert
 from keyboards import grid
 
 log = logging.getLogger(__name__)
@@ -53,14 +53,14 @@ TOPIC_ALL = "tpa:"       # tpa:<o|i>
 TOPIC_NONE = "tpn:"      # tpn:<o|i>
 TOPIC_SAVE = "tps:"      # tps:<o|i>
 TOPIC_SKIP = "tpx:"      # tpx:<o|i>   skip (onboarding) or cancel (/interests)
-ONBOARD_DELIVERY = "ob:"  # ob:<instant|digest>
+ONBOARD_DELIVERY = "ob:"  # ob:<instant|digest>: from older onboarding messages, finishes onboarding
 SOURCE = "sr:"           # sr:<o|s>:<provider_id>   o = onboarding, s = 📚 Sources / settings
 SOURCE_ALL = "sra:"      # sra:<o|s>
 SOURCE_NONE = "srn:"     # srn:<o|s>
 SOURCE_SAVE = "srs:"     # srs:<o|s>   ➡️ Next (onboarding) or 💾 Save
 SOURCE_SKIP = "srx:"     # srx:<o|s>   skip with every source on (onboarding) or cancel
 SETTINGS = "st:"         # st:<screen or action>[:<value>]
-DIGEST = "dg:"           # dg:<instant|digest> | dg:h:<hour>
+DIGEST = "dg:"           # buttons of the removed daily digest, in older messages
 ADMIN = "ad:"            # ad:<action>[:<id>][:<page>]
 BACKUP = "bk:"           # bk:now | bk:on | bk:off
 PULL_MORE = "pull:more"  # the "more" button under a 📥 Latest news batch
@@ -74,7 +74,6 @@ MAX_OWN_TECHNOLOGIES = 50
 TERM_CHARS = re.compile(r"[\w .+#/\-]+")
 TECH_GROUPS = load_technologies()[0]  # group key -> {"en": name, "am": name}, in display order
 
-DIGEST_HOURS = (6, 7, 8, 9, 12, 13, 18, 20, 21)
 DAILY_LIMITS = (10, 20, 30, 50, 100, 0)
 PROVIDERS_PER_PAGE = 8
 
@@ -98,7 +97,7 @@ def _commands(user: User) -> list[BotCommand]:
     L = tr(user)
     commands = [BotCommand("start", L.CMD_START), BotCommand("latest", L.CMD_LATEST),
                 BotCommand("interests", L.CMD_INTERESTS),
-                BotCommand("settings", L.CMD_SETTINGS), BotCommand("digest", L.CMD_DIGEST),
+                BotCommand("settings", L.CMD_SETTINGS),
                 BotCommand("pause", L.CMD_PAUSE), BotCommand("resume", L.CMD_RESUME),
                 BotCommand("sources", L.CMD_SOURCES), BotCommand("language", L.CMD_LANGUAGE),
                 BotCommand("cve", L.CMD_CVE), BotCommand("help", L.CMD_HELP)]
@@ -116,19 +115,16 @@ def main_keyboard(user: User) -> ReplyKeyboardMarkup:
     rows = [[KeyboardButton(L.BTN_PULL)],
             [KeyboardButton(L.BTN_TOPICS), KeyboardButton(L.BTN_SETTINGS)],
             [KeyboardButton(L.BTN_PAUSE if user.notifications_enabled else L.BTN_RESUME),
-             KeyboardButton(L.BTN_DIGEST)],
-            [KeyboardButton(L.BTN_SOURCES), KeyboardButton(L.BTN_CVE)]]
-    help_row = [KeyboardButton(L.BTN_HELP)]
+             KeyboardButton(L.BTN_SOURCES)],
+            [KeyboardButton(L.BTN_CVE), KeyboardButton(texts.LANGUAGE_BUTTON)],
+            [KeyboardButton(L.BTN_HELP)]]
     if config.SUPPORT_USERNAME:
-        help_row.append(KeyboardButton(L.BTN_CONTACT))
-    last = [KeyboardButton(texts.LANGUAGE_BUTTON)]
+        rows[-1].append(KeyboardButton(L.BTN_CONTACT))
     if user.is_admin:
-        last.append(KeyboardButton(L.BTN_ADMIN))
-    if len(help_row) == 1:  # no support contact: keep Help on the last row as before
-        last.insert(1, help_row.pop())
-    if help_row:
-        rows.append(help_row)
-    rows.append(last)
+        if len(rows[-1]) == 1:  # no Contact us button: Admin fits beside Help
+            rows[-1].append(KeyboardButton(L.BTN_ADMIN))
+        else:
+            rows.append([KeyboardButton(L.BTN_ADMIN)])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True,
                                input_field_placeholder=L.KEYBOARD_PLACEHOLDER)
 
@@ -345,11 +341,11 @@ async def topic_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def _onboarding_after_topics(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
     """Onboarding after topics (and technologies): the sources step if any source covers the topics,
-    then how news should arrive."""
+    then onboarding is done."""
     if _source_groups(user, "o"):
         await _show_sources(update, context, user, "o")
     else:
-        await _show_delivery_step(update, context, user)
+        await _finish_onboarding(update, context, user)
 
 
 async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -371,13 +367,6 @@ async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await _send(context, update.effective_chat.id, L.MENU_HINT, main_keyboard(user))
     if db.interests(user.telegram_id):
         await send_welcome_news(context.bot, user)
-
-
-async def _show_delivery_step(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
-    L = tr(user)
-    keyboard = InlineKeyboardMarkup(_grid([(L.DELIVERY_INSTANT, f"{ONBOARD_DELIVERY}instant"),
-                                           (L.DELIVERY_DIGEST, f"{ONBOARD_DELIVERY}digest")]))
-    await _show(update, context, L.DELIVERY_PROMPT, keyboard)
 
 
 # ---------- news sources (onboarding step, 📚 Sources, settings) ----------
@@ -502,26 +491,28 @@ async def source_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     on = len(groups) - len(_groups_off(user, groups))
     log.info("User %s has %s of %s sources on", user.telegram_id, on, len(groups))
     if mode == "o":
-        await _show_delivery_step(update, context, user)
+        await _finish_onboarding(update, context, user)
     else:
         await _show(update, context, L.sources_saved(on, len(groups)), None)
 
 
+async def _finish_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
+    """Last onboarding step: alerts are instant for everyone, so after sources the user is done."""
+    L = tr(user)
+    user = db.update_user(user.telegram_id, delivery_mode="instant", onboarding_completed=True)
+    await _show(update, context, L.onboarding_done(_topic_names(user)), None)
+    await _send(context, update.effective_chat.id, L.MENU_HINT, main_keyboard(user))
+    log.info("User %s finished onboarding", user.telegram_id)
+    await send_welcome_news(context.bot, user)
+
+
 async def onboarding_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """ob:<instant|digest>: last onboarding step."""
-    query = update.callback_query
+    """ob:<instant|digest>: the delivery step of older onboarding messages; finishes onboarding."""
     user = await _active_user(update, context)
     if not user:
         return
-    L = tr(user)
-    mode = query.data[len(ONBOARD_DELIVERY):]
-    await query.answer()
-    user = db.update_user(user.telegram_id, delivery_mode=mode, onboarding_completed=True)
-    await _show(update, context, L.DELIVERY_INSTANT if mode == "instant" else L.DELIVERY_DIGEST, None)
-    await _send(context, update.effective_chat.id,
-                L.onboarding_done(_topic_names(user), mode == "instant", user.digest_hour), main_keyboard(user))
-    log.info("User %s finished onboarding (%s)", user.telegram_id, mode)
-    await send_welcome_news(context.bot, user)
+    await update.callback_query.answer()
+    await _finish_onboarding(update, context, user)
 
 
 # ---------- pause / resume ----------
@@ -562,10 +553,8 @@ def _set_paused(user: User, paused: bool) -> User:
 def _settings_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
     interests_ = db.interests(user.telegram_id)
-    instant = user.delivery_mode == "instant"
     text = L.settings_text(
         L.ON if user.notifications_enabled else L.OFF,
-        L.INSTANT if instant else L.digest_at(user.digest_hour),
         L.limit_text(user.max_per_day),
         L.NEWS_LANGUAGES.get(user.news_language, user.news_language),
         len(interests_), sum(1 for on in interests_.values() if not on),
@@ -573,8 +562,6 @@ def _settings_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     rows = _grid([
         (L.SET_PAUSE if user.notifications_enabled else L.SET_RESUME,
          f"{SETTINGS}{'pause' if user.notifications_enabled else 'resume'}"),
-        (L.SET_TO_DIGEST if instant else L.SET_TO_INSTANT, f"{SETTINGS}mode:{'digest' if instant else 'instant'}"),
-        (L.SET_HOUR, f"{SETTINGS}hour"),
         (L.SET_LIMIT, f"{SETTINGS}limit"),
         (L.SET_NEWS_LANGUAGE, f"{SETTINGS}nl"),
         (L.SET_TOPICS, f"{SETTINGS}topics"),
@@ -629,27 +616,6 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer()
         await _send(context, update.effective_chat.id, L.PAUSED if action == "pause" else L.RESUMED,
                     main_keyboard(user))
-    elif action == "mode" and value in ("instant", "digest"):
-        user = _set_mode(user, value)
-        await query.answer(L.DELIVERY_INSTANT if value == "instant" else L.digest_at(user.digest_hour))
-    elif action == "hour":
-        # The digest time picker. "⚡ Instantly" means no digest: alerts as stories arrive.
-        # Picking an hour turns the digest on at that hour.
-        if value == "instant":
-            user = _set_mode(user, "instant")
-            await query.answer(L.DELIVERY_INSTANT)
-        elif value is not None and value.isdigit() and int(value) in DIGEST_HOURS:
-            user = db.update_user(user.telegram_id, digest_hour=int(value))
-            user = _set_mode(user, "digest")
-            await query.answer(L.digest_at(user.digest_hour))
-        else:
-            await query.answer()
-        instant = user.delivery_mode == "instant"
-        rows = [[InlineKeyboardButton(_mark(instant, L.HOUR_INSTANT), callback_data=f"{SETTINGS}hour:instant")]]
-        rows += _grid([(_mark(not instant and h == user.digest_hour, f"{h:02d}:00"), f"{SETTINGS}hour:{h}")
-                       for h in DIGEST_HOURS])
-        await _show(update, context, L.HOUR_PROMPT, InlineKeyboardMarkup(rows + [back]))
-        return
     elif action == "limit":
         if value is not None and value.isdigit() and int(value) in DAILY_LIMITS:
             user = db.update_user(user.telegram_id, max_per_day=int(value))
@@ -698,71 +664,15 @@ def _mute_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     return (L.MUTE_PROMPT if categories else L.MUTE_NONE), InlineKeyboardMarkup(rows)
 
 
-def _set_mode(user: User, mode: str) -> User:
-    """Instant -> digest: waiting alerts are held for the digest. Digest -> instant: the held ones are
-    dropped rather than sent as a burst."""
-    if mode == user.delivery_mode:
-        return user
-    return db.set_delivery_mode(user.telegram_id, mode)
-
-
-# ---------- digest ----------
-def _digest_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
-    L = tr(user)
-    instant = user.delivery_mode == "instant"
-    rows = _grid([(_mark(instant, L.DELIVERY_INSTANT), f"{DIGEST}instant"),
-                    (_mark(not instant, L.DELIVERY_DIGEST), f"{DIGEST}digest")])
-    rows += _grid([(_mark(not instant and h == user.digest_hour, f"{h:02d}:00"), f"{DIGEST}h:{h}")
-                    for h in DIGEST_HOURS])
-    if not instant:
-        rows.append([InlineKeyboardButton(L.DIGEST_NOW, callback_data=f"{DIGEST}now")])
-    return L.digest_menu(instant, user.digest_hour), InlineKeyboardMarkup(rows)
-
-
-async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """📰 Digest or /digest."""
-    user = await _active_user(update, context)
-    if user:
-        await _send(context, update.effective_chat.id, *_digest_screen(user))
-
-
-async def digest_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """dg:instant, dg:digest, dg:h:<hour> (choosing an hour also turns the digest on)."""
-    query = update.callback_query
+async def digest_removed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/digest, 📰 Digest and dg:… buttons from before the daily digest was removed: say so and give the
+    current keyboard."""
     user = await _active_user(update, context)
     if not user:
         return
-    value = query.data[len(DIGEST):]
-    if value == "now":
-        await digest_now(update, context, user)
-        return
-    if value in ("instant", "digest"):
-        user = _set_mode(user, value)
-    elif value.startswith("h:") and value[2:].isdigit() and int(value[2:]) in DIGEST_HOURS:
-        user = db.update_user(user.telegram_id, digest_hour=int(value[2:]))
-        user = _set_mode(user, "digest")
-    await query.answer()
-    await _show(update, context, *_digest_screen(user))
-
-
-async def digest_now(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
-    """⚡ Get my digest now: check the user's sources for new stories, then send everything held for
-    their digest straight away instead of waiting for the digest hour. The scheduled digest still comes
-    at its hour with whatever arrives after this."""
-    query = update.callback_query
-    L = tr(user)
-    digester = context.application.bot_data.get("digester")
-    if digester is None:
-        digester = context.application.bot_data["digester"] = Digester(context.bot)
-    await query.answer(L.DIGEST_NOW_LOADING)
-    await _refresh_sources(context, user, update.effective_chat.id)
-    count = await digester.send(db.get_user(user.telegram_id), datetime.now(config.TIMEZONE))
-    if count is None:
-        await _send(context, update.effective_chat.id, L.DIGEST_NOW_FAILED)
-    elif count == 0:
-        await _send(context, update.effective_chat.id, L.DIGEST_NOW_EMPTY, main_keyboard(user))
-    else:
-        log.info("Digest on demand for %s: %s stories", user.telegram_id, count)
+    if update.callback_query:
+        await update.callback_query.answer()
+    await _send(context, update.effective_chat.id, tr(user).DIGEST_REMOVED, main_keyboard(user))
 
 
 # ---------- muting from an alert ----------
@@ -908,11 +818,10 @@ class OnboardingAutosave:
         idle_since = (now - timedelta(minutes=config.ONBOARDING_AUTOSAVE_MINUTES)).isoformat()
         done = 0
         for user in db.onboarding_idle_users(idle_since):
-            user = db.update_user(user.telegram_id, onboarding_completed=True)
+            user = db.update_user(user.telegram_id, onboarding_completed=True, delivery_mode="instant")
             L = tr(user)
             try:
-                await self.bot.send_message(user.chat_id, L.auto_saved(_topic_names(user), user.delivery_mode == "instant",
-                                                                        user.digest_hour),
+                await self.bot.send_message(user.chat_id, L.auto_saved(_topic_names(user)),
                                             parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user))
             except TelegramError as e:
                 log.warning("Auto-save message to %s failed: %s", user.telegram_id, e)
@@ -1515,14 +1424,14 @@ def build_application(request=None) -> Application:
     private = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
 
     for command, handler in [("start", start), ("latest", pull_news), ("interests", interests), ("topics", interests),
-                             ("settings", settings), ("digest", digest), ("pause", pause), ("resume", resume),
+                             ("settings", settings), ("digest", digest_removed), ("pause", pause), ("resume", resume),
                              ("sources", sources), ("language", choose_language), ("help", help_command),
                              ("admin", admin), ("backup", backup_menu), ("cve", cve), ("support", support)]:
         app.add_handler(CommandHandler(command, handler, filters=private))
 
     # Reply keyboard buttons, in every language.
     for name, handler in [("BTN_TOPICS", interests), ("BTN_SETTINGS", settings), ("BTN_PAUSE", pause),
-                          ("BTN_RESUME", resume), ("BTN_DIGEST", digest), ("BTN_SOURCES", sources),
+                          ("BTN_RESUME", resume), ("BTN_DIGEST", digest_removed), ("BTN_SOURCES", sources),
                           ("BTN_HELP", help_command), ("BTN_ADMIN", admin), ("BTN_PULL", pull_news),
                           ("BTN_CVE", cve), ("BTN_CONTACT", support)]:
         app.add_handler(MessageHandler(private & filters.Text(texts.labels(name)), handler))
@@ -1536,7 +1445,7 @@ def build_application(request=None) -> Application:
     app.add_handler(CallbackQueryHandler(source_tap, pattern=rf"^({SOURCE}[os]:\d+|{SOURCE_ALL}[os]|{SOURCE_NONE}[os])$"))
     app.add_handler(CallbackQueryHandler(source_save, pattern=rf"^({SOURCE_SAVE}|{SOURCE_SKIP})[os]$"))
     app.add_handler(CallbackQueryHandler(settings_action, pattern=rf"^{SETTINGS}[a-z]+(:[a-z0-9]+)?$"))
-    app.add_handler(CallbackQueryHandler(digest_action, pattern=rf"^{DIGEST}(instant|digest|now|h:\d+)$"))
+    app.add_handler(CallbackQueryHandler(digest_removed, pattern=rf"^{DIGEST}"))
     app.add_handler(CallbackQueryHandler(mute_from_alert, pattern=rf"^{MUTE_FROM_ALERT}\d+$"))
     app.add_handler(CallbackQueryHandler(admin_action, pattern=rf"^{ADMIN}[a-z]+(:\d+){{0,2}}$"))
     app.add_handler(CallbackQueryHandler(backup_action, pattern=rf"^{BACKUP}(now|on|off)$"))

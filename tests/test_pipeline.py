@@ -9,7 +9,7 @@ from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
 import config
 from collector import Collector, FetchResult
 from db import Database, db, now_utc
-from delivery import Digester, Sender
+from delivery import Sender
 from news import RawArticle
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -222,24 +222,6 @@ def test_eligibility_is_rechecked_at_send_time(bot_and_api):
     assert send_all(Sender(bot)) == ["skipped"]
 
 
-def test_digest_mode(bot_and_api):
-    bot, api = bot_and_api
-    make_user(100, ["sports"], delivery_mode="digest", digest_hour=8)
-    Collector().process(provider("bbc_sport"), [raw("1", "Arsenal win again in cup tie", "", url="https://e.com/1"),
-                                                raw("2", "Tennis star reaches Wimbledon final", "",
-                                                    url="https://e.com/2")], now_utc())
-    assert statuses(100) == ["digest", "digest"]
-    assert db.due_notifications() == []
-    digester = Digester(bot)
-    morning = datetime(2026, 11, 27, 8, 0, tzinfo=config.TIMEZONE)
-    assert asyncio.run(digester.run_once(morning.replace(hour=7))) == 0  # not their hour
-    assert asyncio.run(digester.run_once(morning)) == 1
-    text = api.last("sendMessage")["text"]
-    assert "Your daily digest" in text and 'href="https://e.com/1"' in text and "BBC Sport" in text
-    assert statuses(100) == ["sent", "sent"]
-    assert asyncio.run(digester.run_once(morning.replace(minute=30))) == 0  # once a day
-
-
 def test_one_provider_failing_does_not_stop_others():
     class Ok:
         async def fetch(self, p):
@@ -266,9 +248,9 @@ def test_one_provider_failing_does_not_stop_others():
 
 
 def test_preferences_survive_a_restart():
-    make_user(100, ["cybersecurity", "sports"], delivery_mode="digest")
+    make_user(100, ["cybersecurity", "sports"], max_per_day=10)
     reopened = Database()  # a new connection, as after a restart
-    assert reopened.get_user(100).delivery_mode == "digest"
+    assert reopened.get_user(100).max_per_day == 10
     assert len(reopened.interests(100)) == 2
     reopened.close()
 

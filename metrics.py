@@ -25,7 +25,6 @@ HELP = {
     "notifications_skipped": "Alerts skipped at send time",
     "telegram_rate_limited": "Telegram retry_after responses",
     "image_fallbacks": "Photo alerts sent as text because the image failed",
-    "digests_sent": "Daily digests sent",
     "news_pulled": "Stories sent because a user tapped 📥 Latest news",
     "cves_stored": "New CVEs stored",
     "cves_updated": "Stored CVEs whose products, severity or exploited flag changed",

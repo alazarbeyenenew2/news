@@ -62,8 +62,7 @@ def onboard(chat: Chat, user: int = USER, topics=("cybersecurity", "sports")):
     for t in topics:
         chat.tap(f"tp:o:{cid(t)}", user)
     chat.tap("tps:o", user)
-    chat.tap("srx:o", user)  # sources step: keep them all
-    chat.tap("ob:instant", user)
+    chat.tap("srx:o", user)  # sources step: keep them all (the last step)
 
 
 def test_texts_define_the_same_names():
@@ -105,14 +104,12 @@ def test_new_user_onboarding(chat):
     assert texts_en.NEXT in labels
     assert any(t.startswith(texts_en.SOURCES_SKIP) for t in labels)
 
-    api = chat.tap("srs:o")  # ➡️ Next with the defaults
-    assert "How should news reach you" in api.last("editMessageText")["text"]
+    api = chat.tap("srs:o")  # ➡️ Next with the defaults: onboarding is done (alerts are always instant)
     assert db.source_exclusions(USER) == set()
-    assert not db.get_user(USER).onboarding_completed
-
-    api = chat.tap("ob:instant")
-    done = api.last("sendMessage")
-    assert "You're all set" in done["text"] and "Cybersecurity" in done["text"]
+    edited = api.last("editMessageText")["text"]
+    assert "You're all set" in edited and "Cybersecurity" in edited and "as soon as" in edited
+    assert "How should news reach you" not in str(api.calls)
+    done = [p for m, p in api.calls if m == "sendMessage" and "keyboard" in str(p.get("reply_markup"))][0]
     assert done["reply_markup"]["keyboard"][0][0]["text"] == texts_en.BTN_PULL
     assert done["reply_markup"]["keyboard"][1][0]["text"] == texts_en.BTN_TOPICS
     user = db.get_user(USER)
@@ -179,7 +176,7 @@ def test_pause_and_resume(chat):
     assert api.last("sendMessage")["reply_markup"]["keyboard"][2][0]["text"] == texts_en.BTN_PAUSE
 
 
-def test_settings_digest_limit_language_mute(chat):
+def test_settings_limit_language_mute(chat):
     onboard(chat)
     api = chat.send("/settings")
     assert "Daily limit" in api.last("sendMessage")["text"]
@@ -189,12 +186,7 @@ def test_settings_digest_limit_language_mute(chat):
     assert db.get_user(USER).max_per_day == 10
     chat.tap("st:nl:am")
     assert db.get_user(USER).news_language == "am"
-    chat.tap("st:mode:digest")
-    assert db.get_user(USER).delivery_mode == "digest"
-    chat.tap("dg:h:20")
-    assert db.get_user(USER).digest_hour == 20
-    chat.tap("dg:instant")
-    assert db.get_user(USER).delivery_mode == "instant"
+    assert "Digest" not in str(chat.send("/settings").last("sendMessage")["reply_markup"])
     chat.tap(f"st:mute:{cid('sports')}")
     assert db.interests(USER)[cid("sports")] is False
     chat.tap(f"st:mute:{cid('sports')}")
@@ -387,7 +379,7 @@ def test_menus_are_checkbox_grids(chat):
         db.update_user(SUPER, language=language)
         screens = {"topics": chat.send("/interests", SUPER).last("sendMessage"),
                    "settings": chat.send("/settings", SUPER).last("sendMessage"),
-                   "digest": chat.send("/digest", SUPER).last("sendMessage"),
+                   "limit": chat.tap("st:limit", SUPER).last("editMessageText"),
                    "sources": chat.send("/sources", SUPER).last("sendMessage"),
                    "admin": chat.send("/admin", SUPER).last("sendMessage")}
         for name, message in screens.items():
@@ -398,7 +390,9 @@ def test_menus_are_checkbox_grids(chat):
                       if row[0]["callback_data"].startswith("tp:")]
         assert sum(len(row) for row in topic_rows) == len(db.categories()) + 1  # + 🛡 CVE reports
         assert sum(1 for row in topic_rows if len(row) >= 2) >= 4  # mostly 2-3 per row
-        assert any(len(row) == 3 for row in _rows(screens["digest"]))  # short labels: 3 per row
+    from keyboards import grid
+    from telegram import InlineKeyboardButton
+    assert len(grid([InlineKeyboardButton(f"{h:02d}:00", callback_data="x") for h in range(6)])[0]) == 3  # short: 3 a row
 
 
 def test_grid_layout_rules():
@@ -460,9 +454,8 @@ def test_onboarding_source_choice_and_skip(chat):
     hacker_news = next(p.id for p in db.providers() if p.key == "thehackernews")
     chat.tap(f"sr:o:{hacker_news}")
     api = chat.tap("srs:o")
-    assert "How should news reach you" in api.last("editMessageText")["text"]
+    assert "You're all set" in api.last("editMessageText")["text"]
     assert db.source_exclusions(USER) == {hacker_news}
-    chat.tap("ob:instant")
     assert db.get_user(USER).onboarding_completed
     # Skip in onboarding means every source on.
     db.update_user(USER, onboarding_completed=False)
@@ -515,9 +508,8 @@ def test_finishing_onboarding_sends_todays_news(chat):
     chat.tap("lang:en")
     chat.tap(f"tp:o:{cid('sports')}")
     chat.tap("tps:o")
-    chat.tap("srx:o")
-    api = chat.tap("ob:instant")
-    texts_sent = [p.get("text") or "" for m, p in api.calls if m == "sendMessage"]
+    api = chat.tap("srx:o")
+    texts_sent = [p.get("text") or "" for m, p in api.calls if m in ("sendMessage", "editMessageText")]
     assert any("You're all set" in t for t in texts_sent)
     assert any(texts_en.WELCOME_NEWS_INTRO in t for t in texts_sent)
     assert len(_alerts(api)) == 3 and set(_statuses().values()) == {"pulled"}
@@ -557,56 +549,12 @@ def test_onboarding_choices_auto_save_after_ten_minutes(chat):
     assert chat.loop.run_until_complete(autosave.run_once()) == 0 and _alerts(chat.api) == []  # once
 
 
-def test_digest_now_sends_held_stories_immediately(chat):
-    from collector import Collector
-    from db import now_utc
-    from news import RawArticle
-    onboard(chat)
-    chat.tap("dg:h:20")  # digest at 20:00
-    user = db.get_user(USER)
-    assert user.delivery_mode == "digest"
-    buttons = [b for row in chat.send("/digest").last("sendMessage")["reply_markup"]["inline_keyboard"] for b in row]
-    assert any(b["callback_data"] == "dg:now" and b["text"] == texts_en.DIGEST_NOW for b in buttons)
-    bbc = next(p for p in db.providers() if p.key == "bbc_sport")
-    db.execute("UPDATE providers SET last_success_at = %s WHERE id = %s", (now_utc(), bbc.id))  # not a backlog fetch
-    Collector().process(db.get_provider(bbc.id), [RawArticle(
-        external_id="d1", title="Arsenal win the cup final in extra time", description="",
-        url="https://e.com/d1", published_at=now_utc(), language="en")], now_utc())
-    held = [r for r in db.execute("SELECT status FROM notifications WHERE user_id = %s", (USER,))]
-    assert [r["status"] for r in held] == ["digest"]
-    chat.api.clear()
-    chat.tap("dg:now")
-    texts_sent = chat.api.sent_texts()
-    assert any("Your daily digest" in t and "https://e.com/d1" in t for t in texts_sent)
-    assert [r["status"] for r in db.execute("SELECT status FROM notifications WHERE user_id = %s", (USER,))] == ["sent"]
-    assert db.get_user(USER).last_digest_date is None  # the 20:00 digest still comes with newer stories
-    chat.api.clear()
-    chat.tap("dg:now")  # nothing left
-    assert texts_en.DIGEST_NOW_EMPTY in chat.api.sent_texts()
-
-
-def test_digest_time_picker_offers_instantly(chat):
-    onboard(chat)
-    api = chat.tap("st:hour")
-    screen = api.last("editMessageText")
-    first = screen["reply_markup"]["inline_keyboard"][0][0]
-    assert "When should the daily digest arrive?" in screen["text"]
-    assert first["callback_data"] == "st:hour:instant" and texts_en.HOUR_INSTANT in first["text"]
-    chat.tap("st:hour:20")  # picking a time turns the digest on
-    assert db.get_user(USER).delivery_mode == "digest" and db.get_user(USER).digest_hour == 20
-    api = chat.tap("st:hour:instant")
-    assert db.get_user(USER).delivery_mode == "instant"
-    first = api.last("editMessageText")["reply_markup"]["inline_keyboard"][0][0]
-    assert first["text"].startswith("✅")  # the picker stays open with ⚡ Instantly ticked
-
-
 def _join_with_sports(chat):
     chat.send("/start")
     chat.tap("lang:en")
     chat.tap(f"tp:o:{cid('sports')}")
     chat.tap("tps:o")
-    chat.tap("srx:o")
-    return chat.tap("ob:instant")
+    return chat.tap("srx:o")
 
 
 def test_new_users_get_ten_latest_stories(chat):
@@ -631,3 +579,26 @@ def test_welcome_news_tops_up_with_other_topics(chat):
     assert len(shown) == 10
     assert sum("The Hacker News" in t for t in shown) == 7  # 3 sports first, then today's latest from other topics
     assert not any("more waiting" in (p.get("text") or "") for m, p in api.calls if m == "sendMessage")
+
+
+def test_daily_digest_is_gone(chat):
+    onboard(chat)
+    from bot import main_keyboard
+    labels = [b.text for row in main_keyboard(db.get_user(USER)).keyboard for b in row]
+    assert texts_en.BTN_DIGEST not in labels and texts_en.BTN_PULL in labels
+    # Old /digest command, 📰 Digest button and digest buttons in older messages explain it's gone.
+    for api in (chat.send("/digest"), chat.send(texts_en.BTN_DIGEST), chat.tap("dg:h:20"), chat.tap("dg:now")):
+        assert texts_en.DIGEST_REMOVED in api.last("sendMessage")["text"]
+    assert db.get_user(USER).delivery_mode == "instant"
+    settings = str(chat.send("/settings").last("sendMessage"))
+    assert "st:mode" not in settings and "st:hour" not in settings
+    assert "Daily limit" in chat.tap("st:mode:digest").last("editMessageText")["text"]  # old button: settings
+    assert db.get_user(USER).delivery_mode == "instant"
+
+
+def test_digest_migration_switches_everyone_to_instant():
+    from pathlib import Path
+    db.upsert_user(300, 300, None, "Old digest user")
+    db.execute("UPDATE users SET delivery_mode = 'digest' WHERE telegram_id = 300")
+    db.execute(Path("migrations/010_remove_daily_digest.sql").read_text())
+    assert db.get_user(300).delivery_mode == "instant"

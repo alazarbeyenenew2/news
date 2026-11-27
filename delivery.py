@@ -3,7 +3,7 @@
 The Sender works through queued notifications: it re-checks that the user still wants the alert, sends
 it (photo with caption when the feed gave an image, text otherwise), and records the result. Temporary
 errors are retried with exponential backoff; Telegram's retry_after is respected; permanent errors and
-users who blocked the bot are not retried. The Digester sends each digest user one message a day.
+users who blocked the bot are not retried. Every alert is instant (there is no daily digest).
 """
 import asyncio
 import html
@@ -138,7 +138,7 @@ class Sender:
 
     def _eligible_category(self, n: Notification, user: User | None, article: Article | None) -> int | None | bool:
         """The category to show, or False if the alert should be skipped (user paused, unsubscribed,
-        muted, blocked the bot, switched to the digest…). Uses the same rules as queuing."""
+        muted, blocked the bot…). Uses the same rules as queuing."""
         if not user or not article:
             return False
         matches = dict(db.matching_users(article))
@@ -154,9 +154,6 @@ class Sender:
             return current.status if current else "gone"  # e.g. pulled with 📥 Latest news meanwhile
         user = db.get_user(n.user_id)
         article = db.get_article(n.article_id)
-        if user and user.delivery_mode == "digest":
-            db.mark_notification(n.id, "digest", count_attempt=False)
-            return "digest"
         cve = db.get_cve(article.id) if article else None
         if cve:  # CVE reports: same rules as when it was queued (CVE alerts on, severity, technologies)
             still = {m[0] for m in db.cve_matching_users(article, cve)}
@@ -236,74 +233,3 @@ async def send_alert(bot, user: User, article: Article, provider_name: str, cate
     message = await bot.send_message(user.chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup,
                                      disable_web_page_preview=True)
     return message.message_id
-
-
-class Digester:
-    """Once a minute: users whose digest hour has come (in TIMEZONE) and who haven't had today's digest
-    get one message listing their held stories."""
-
-    def __init__(self, bot):
-        self.bot = bot
-        self._locks: dict[int, asyncio.Lock] = {}
-
-    async def run_forever(self) -> None:
-        while True:
-            try:
-                await self.run_once(datetime.now(config.TIMEZONE))
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                log.exception("Digest loop error")
-            await asyncio.sleep(60)
-
-    async def run_once(self, local_now: datetime) -> int:
-        sent = 0
-        today = local_now.date().isoformat()
-        for user in db.digest_users_due(local_now.hour, today):
-            db.update_user(user.telegram_id, last_digest_date=today)
-            result = await self.send(user, local_now)
-            if result is None:  # Telegram error: try again next minute
-                db.update_user(user.telegram_id, last_digest_date=None)
-            elif result:
-                sent += 1
-        return sent
-
-    async def send(self, user, local_now: datetime) -> int | None:
-        """Send the user's held stories as one digest message now. Returns how many stories were in it
-        (0: nothing waiting), or None if Telegram failed."""
-        lock = self._locks.setdefault(user.telegram_id, asyncio.Lock())
-        async with lock:  # the scheduled digest and "send now" never send the same stories twice
-            return await self._send(user, local_now)
-
-    async def _send(self, user, local_now: datetime) -> int | None:
-        items = db.digest_items(user.telegram_id)
-        if not items:
-            return 0
-        L = texts.get(user.language)
-        shown = items[:config.DIGEST_MAX_ARTICLES]
-        providers = {p.id: p.name for p in db.providers()}
-        lines = [L.digest_title(local_now.strftime("%d/%m/%Y"), len(items))]
-        for i, (_, a) in enumerate(shown, 1):
-            lines.append(f"{i}. <a href=\"{html.escape(a.canonical_url, quote=True)}\">"
-                         f"{html.escape(_truncate(a.title, 140))}</a> — {html.escape(providers.get(a.provider_id, ''))}")
-        if len(items) > len(shown):
-            lines.append(L.digest_more(len(items) - len(shown)))
-        text = "\n".join(lines)
-        if len(text) > TEXT_LIMIT:
-            text = text[:TEXT_LIMIT - 1].rsplit("\n", 1)[0]
-        try:
-            await self.bot.send_message(user.chat_id, text, parse_mode=ParseMode.HTML,
-                                        disable_web_page_preview=True)
-        except Forbidden:
-            db.update_user(user.telegram_id, status="blocked")
-            db.skip_queued_for_user(user.telegram_id, "user blocked the bot")
-            return 0
-        except TelegramError as e:
-            log.warning("Digest to %s failed: %s", user.telegram_id, e)
-            return None
-        for n, _ in shown:
-            db.mark_notification(n.id, "sent")
-        for n, _ in items[len(shown):]:
-            db.mark_notification(n.id, "skipped", "over the digest limit", count_attempt=False)
-        metrics.inc("digests_sent")
-        return len(shown)

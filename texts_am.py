@@ -25,7 +25,6 @@ CMD_START = "መጀመሪያ / ዋና ምናሌ"
 CMD_INTERESTS = "ርዕሶችዎን ይምረጡ"
 CMD_SOURCES = "የዜና ምንጮች"
 CMD_LANGUAGE = "ቋንቋ ቀይር"
-CMD_DIGEST = "ፈጣን ማሳወቂያ ወይስ ዕለታዊ ማጠቃለያ"
 CMD_PAUSE = "ማሳወቂያ አቁም"
 CMD_RESUME = "ማሳወቂያ ቀጥል"
 CMD_SETTINGS = "ቅንብሮች"
@@ -76,34 +75,22 @@ def topic_removed(topic: str) -> str:
 TOPIC_NONE = "⬜ አጽዳ"
 TOPIC_NEED_ONE = "ቢያንስ አንድ ርዕስ ይምረጡ፣ ወይም “አሁን እለፈው”ን ይንኩ።"
 
-DELIVERY_PROMPT = (f"📬 <b>ዜና እንዴት ይድረስዎ?</b>\n{LINE}\n"
-                   "⚡ <b>ፈጣን</b>፦ አዲስ ዜና እንደተገኘ ለእያንዳንዱ ማሳወቂያ።\n"
-                   "📰 <b>ዕለታዊ ማጠቃለያ</b>፦ በቀን አንድ መልእክት ከዕለቱ ዜናዎች ጋር።\n\n"
-                   "<i>በኋላ በ⚙️ ቅንብሮች መቀየር ይችላሉ።</i>")
-DELIVERY_INSTANT = "⚡ ፈጣን ማሳወቂያ"
-DIGEST_NOW = "⚡ ማጠቃለያዬን አሁን ላክ"
-DIGEST_NOW_LOADING = "⏳ የቅርብ ዜናዎችን እየፈለግሁ ነው…"
-DIGEST_NOW_EMPTY = ("📭 አሁን በማጠቃለያዎ ውስጥ የሚጠብቅ ዜና የለም። ለርዕሶችዎ አዳዲስ ዜናዎች ለቀጣዩ ማጠቃለያ "
-                    "ይሰበሰባሉ — ወይም የዛሬን ዜናዎች ለማየት 📥 የቅርብ ዜናዎችን ይጫኑ።")
-DIGEST_NOW_FAILED = "⚠️ ማጠቃለያዎን አሁን መላክ አልቻልኩም። እባክዎ ከአንድ ደቂቃ በኋላ እንደገና ይሞክሩ።"
-DELIVERY_DIGEST = "📰 ዕለታዊ ማጠቃለያ"
 
-
-def onboarding_done(topics: str, instant: bool, hour: int) -> str:
-    how = "⚡ ወዲያውኑ" if instant else f"📰 በየቀኑ {hour:02d}:00 ላይ በማጠቃለያ"
+def onboarding_done(topics: str) -> str:
     return (f"✅ <b>ሁሉም ተዘጋጅቷል!</b>\n{LINE}\n"
-            f"ርዕሶች፦ {topics}\nዜና {how} ይደርስዎታል።\n\n"
+            f"ርዕሶች፦ {topics}\nእያንዳንዱ ዜና እንደወጣ ⚡ ወዲያውኑ ይደርስዎታል።\n\n"
             "ከአሁን በኋላ የሚወጡ ዜናዎች ብቻ ይላካሉ፤ የቆዩ ዜናዎች አይጎርፉም።\n"
             "ማንኛውንም ለመቀየር ከታች ያሉትን ቁልፎች ይጠቀሙ።")
 
 
-def auto_saved(topics: str, instant: bool, hour: int) -> str:
-    how = "⚡ ወዲያውኑ" if instant else f"📰 በየቀኑ {hour:02d}:00 ላይ በማጠቃለያ"
+def auto_saved(topics: str) -> str:
     return (f"✅ <b>ምርጫዎችዎ ተቀምጠዋል።</b>\n{LINE}\n"
-            f"ርዕሶች፦ {topics}\nዜና {how} ይደርስዎታል።\n\n"
+            f"ርዕሶች፦ {topics}\nእያንዳንዱ ዜና እንደወጣ ⚡ ወዲያውኑ ይደርስዎታል።\n\n"
             "ማንኛውንም ከታች ባሉት ቁልፎች ይቀይሩ፦ 🗞 የኔ ርዕሶች፣ 📚 ምንጮች፣ ⚙️ ቅንብሮች።")
 
 
+DIGEST_REMOVED = ("📰 ዕለታዊ ማጠቃለያ ተቋርጧል፦ አሁን እያንዳንዱ ዜና እንደወጣ ⚡ ወዲያውኑ ይደርስዎታል። "
+                  "ያላዩዋቸውን የዛሬ ዜናዎች ለማግኘት በማንኛውም ጊዜ 📥 የቅርብ ዜናዎችን ይንኩ።")
 WELCOME_NEWS_INTRO = "📰 <b>ለመጀመር የቅርብ ጊዜ ዜናዎች</b>፦"
 
 ONBOARDING_SKIPPED = (f"👌 እስካሁን ርዕስ አልመረጡም።\n{LINE}\n"
@@ -133,21 +120,15 @@ RESUMED_NO_TOPICS = "\n\n⚠️ እስካሁን ርዕስ የለዎትም፦ <b>
 SETTINGS_TITLE = "⚙️ <b>ቅንብሮች</b>"
 ON = "✅ በርቷል"
 OFF = "⏸ ቆሟል"
-INSTANT = "⚡ ፈጣን"
 NO_LIMIT = "ገደብ የለም"
 ANY_LANGUAGE = "ሁሉም ቋንቋዎች"
 NEWS_LANGUAGES = {"any": "🌐 ሁሉም ቋንቋዎች", "en": "🇬🇧 እንግሊዝኛ ብቻ", "am": "🇪🇹 አማርኛ ብቻ"}
 
 
-def digest_at(hour: int) -> str:
-    return f"📰 ዕለታዊ ማጠቃለያ {hour:02d}:00 ላይ"
-
-
-def settings_text(alerts: str, delivery: str, limit: str, news_language: str, topics: int, muted: int) -> str:
+def settings_text(alerts: str, limit: str, news_language: str, topics: int, muted: int) -> str:
     muted_text = f" ({muted} ድምፅ የጠፋ)" if muted else ""
     return (f"{SETTINGS_TITLE}\n{LINE}\n"
             f"🔔 ማሳወቂያ፦ <b>{alerts}</b>\n"
-            f"📬 አደራረስ፦ <b>{delivery}</b>\n"
             f"🔢 የቀን ገደብ፦ <b>{limit}</b>\n"
             f"🗣 የዜና ቋንቋ፦ <b>{news_language}</b>\n"
             f"🗞 ርዕሶች፦ <b>{topics}</b>{muted_text}")
@@ -159,9 +140,6 @@ def limit_text(n: int) -> str:
 
 SET_PAUSE = "⏸ አቁም"
 SET_RESUME = "▶️ ቀጥል"
-SET_TO_DIGEST = "📰 ወደ ማጠቃለያ ቀይር"
-SET_TO_INSTANT = "⚡ ወደ ፈጣን ቀይር"
-SET_HOUR = "🕗 የማጠቃለያ ሰዓት"
 SET_LIMIT = "🔢 የቀን ገደብ"
 SET_NEWS_LANGUAGE = "🗣 የዜና ቋንቋ"
 SET_MUTE = "🔕 ርዕስ ድምፅ አጥፋ"
@@ -169,33 +147,12 @@ SET_TOPICS = "🗞 ርዕሶች"
 BACK = "⬅️ ተመለስ"
 CLOSE = "✖️ ዝጋ"
 
-HOUR_PROMPT = (f"🕗 <b>ዕለታዊ ማጠቃለያው መቼ ይድረስዎ?</b>\n"
-               f"እያንዳንዱን ዜና እንደወጣ ለማግኘት ⚡ ወዲያውኑ የሚለውን ይምረጡ።\n"
-               f"<i>ሰዓቶቹ በ{config.TIMEZONE.key} ናቸው።</i>")
-HOUR_INSTANT = "⚡ ወዲያውኑ"
 LIMIT_PROMPT = ("🔢 <b>በቀን ከፍተኛው የማሳወቂያ ብዛት</b>\nከዚህ በኋላ የቀኑ ቀሪ ዜናዎች ይዘለላሉ "
                 "(በኋላ አይላኩም)።")
 NEWS_LANGUAGE_PROMPT = "🗣 <b>በየትኛው ቋንቋ ዜና ይፈልጋሉ?</b>"
 MUTE_PROMPT = ("🔕 <b>ርዕስ ድምፅ አጥፋ</b>\nድምፁ የጠፋ ርዕስ በዝርዝርዎ ይቆያል፣ ግን ማሳወቂያ አይልክም። "
                "ለማጥፋት ወይም ለማብራት ይንኩ።")
 MUTE_NONE = "እስካሁን ርዕስ የለዎትም።"
-
-
-# ---------- digest ----------
-def digest_menu(instant: bool, hour: int) -> str:
-    now = INSTANT if instant else digest_at(hour)
-    return (f"📰 <b>ዕለታዊ ማጠቃለያ</b>\n{LINE}\n"
-            f"አሁን፦ <b>{now}</b>\n\n"
-            "በማጠቃለያ ለእያንዳንዱ ዜና ማሳወቂያ ከመቀበል ይልቅ፣ ለርዕሶችዎ የወጡ ዜናዎችን "
-            "የያዘ በቀን አንድ መልእክት ያገኛሉ።")
-
-
-def digest_title(day: str, count: int) -> str:
-    return f"📰 <b>የዕለቱ ማጠቃለያዎ</b> · {day}\n{count} ዜናዎች\n{LINE}"
-
-
-def digest_more(count: int) -> str:
-    return f"\n<i>…እና ሌሎች {count}።</i>"
 
 
 # ---------- alerts ----------
@@ -254,8 +211,7 @@ HELP = (f"❓ <b>{BOT} እንዴት ይሠራል</b>\n{LINE}\n"
         "<b>ትዕዛዞች</b>\n"
         "/latest — ያላዩዋቸው የዛሬ ዜናዎች (📥 የቅርብ ዜናዎች)\n"
         "/interests — ርዕሶችዎን ይምረጡ\n"
-        "/settings — ማሳወቂያ፣ ማጠቃለያ፣ የቀን ገደብ፣ የዜና ቋንቋ፣ ምንጮች\n"
-        "/digest — ፈጣን ማሳወቂያ ወይስ ዕለታዊ ማጠቃለያ\n"
+        "/settings — ማሳወቂያ፣ የቀን ገደብ፣ የዜና ቋንቋ፣ ምንጮች\n"
         "/pause, /resume — ማሳወቂያ አቁም ወይም ቀጥል\n"
         "/sources — የዜና ምንጮችዎን ይምረጡ\n"
         "/cve — የCVE ሪፖርቶች፦ በመረጧቸው ቴክኖሎጂዎች (nginx, Windows…) ላይ ያሉ ክፍተቶች\n"
@@ -287,7 +243,7 @@ def admin_status(s: dict, web_hint: bool) -> str:
             f"📡 ምንጮች፦ <b>{s['providers_enabled']}</b> በርተዋል · {s['providers_failing']} እየወደቁ\n"
             f"📰 የዛሬ ዜናዎች፦ <b>{s['articles_today']}</b> · በሌላ ምንጭ የተደገሙ {s['duplicates_today']}"
             f" · ግምገማ የሚጠብቁ {s['low_confidence_today']}\n"
-            f"📬 ወረፋ፦ <b>{s['queued']}</b> (የቆየው {oldest}) · ለማጠቃለያ የተያዙ {s['held_for_digest']}\n"
+            f"📬 ወረፋ፦ <b>{s['queued']}</b> (የቆየው {oldest})\n"
             f"✅ ዛሬ የተላኩ፦ <b>{s['sent_today']}</b> · 📥 የተጠየቁ {s.get('pulled_today', 0)} · ❌ ያልተሳኩ {s['failed_today']} · የተዘለሉ {s['skipped_today']}\n"
             f"🛡 የዛሬ CVEዎች፦ <b>{s.get('cves_today', 0)}</b> · የCVE ሪፖርት የሚቀበሉ {s.get('cve_users', 0)}")
     if web_hint:

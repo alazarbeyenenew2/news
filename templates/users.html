@@ -46,7 +46,6 @@
             <div class="chips">{% for t in p.topics %}<span class="badge {{ 'b-off' if t.muted else 'b-info' }}" {% if t.muted %}style="text-decoration:line-through" title="muted"{% endif %}>{{ t.label }}</span>{% else %}<span class="muted small">No topics</span>{% endfor %}{% if u.cve_alerts %}<span class="badge b-bad">🛡 CVE reports</span>{% endif %}</div>
             <div class="small muted">
               {{ "🔔 alerts on" if u.notifications_enabled else "⏸ paused" }} ·
-              {% if u.delivery_mode == "digest" %}📰 digest {{ "%02d" % u.digest_hour }}:00{% else %}⚡ instant{% endif %} ·
               {{ "no daily limit" if not u.max_per_day else u.max_per_day ~ "/day" }} ·
               🌐 {{ u.language or "—" }}{% if u.news_language != "any" %}, news in {{ u.news_language }} only{% endif %}
             </div>

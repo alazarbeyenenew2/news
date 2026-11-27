@@ -47,7 +47,7 @@
     <span class="sub">{{ stats.pulled_today }} via 📥 Latest news · <a href="/notifications">{{ stats.failed_today }} failed</a></span></div>
   <div class="card stat tone-warn"><span class="chip">{{ icon("inbox", 20) }}</span>
     <span class="label">In the queue</span><b>{{ stats.queued }}</b>
-    <span class="sub">{% if stats.queue_oldest %}oldest due {{ stats.queue_oldest | ago }}{% else %}nothing waiting{% endif %} · {{ stats.held_for_digest }} for digests</span></div>
+    <span class="sub">{% if stats.queue_oldest %}oldest due {{ stats.queue_oldest | ago }}{% else %}nothing waiting{% endif %}</span></div>
   <div class="card stat tone-bad"><span class="chip">{{ icon("shield", 20) }}</span>
     <span class="label">CVEs today</span><b>{{ stats.cves_today }}</b>
     <span class="sub">{{ dash.kev_today }} actively exploited · {{ stats.cve_users }} users with CVE reports</span></div>

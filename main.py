@@ -1,5 +1,5 @@
 """Runs everything in one process: the Telegram bot (long polling), the news collector, the alert sender,
-the daily digests, the nightly backup, and the web admin page with /health, /ready and /metrics."""
+the onboarding auto-save, the nightly backup, and the web admin page with /health, /ready and /metrics."""
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -15,7 +15,7 @@ import config  # noqa: E402
 from bot import OnboardingAutosave, build_application, nightly_backup_loop  # noqa: E402
 from collector import Collector  # noqa: E402
 from db import db, load_seed, load_technologies  # noqa: E402
-from delivery import Digester, Sender  # noqa: E402
+from delivery import Sender  # noqa: E402
 from web import create_web_app  # noqa: E402
 
 log = logging.getLogger("main")
@@ -44,10 +44,8 @@ async def lifespan(app: FastAPI):
     tasks = [asyncio.create_task(nightly_backup_loop(tg_app), name="backup")]
     sender = Sender(tg_app.bot)
     app.state.sender = tg_app.bot_data["sender"] = sender
-    digester = tg_app.bot_data["digester"] = Digester(tg_app.bot)
     if config.DELIVERY_ENABLED:
         tasks += [asyncio.create_task(sender.run_forever(), name="sender"),
-                  asyncio.create_task(digester.run_forever(), name="digest"),
                   asyncio.create_task(OnboardingAutosave(tg_app.bot).run_forever(), name="autosave")]
     collector = Collector(on_queued=sender.wake)
     app.state.collector = tg_app.bot_data["collector"] = collector

@@ -28,7 +28,7 @@ ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
 
-# Times shown to users (publication time, digest hour) and the meaning of "today".
+# Times shown to users (publication time) and the meaning of "today".
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
 
 # PostgreSQL. In production the user and password come from GitHub secrets (see README).
@@ -74,6 +74,5 @@ MESSAGES_PER_SECOND = float(os.getenv("MESSAGES_PER_SECOND", "20"))
 MAX_SEND_ATTEMPTS = int(os.getenv("MAX_SEND_ATTEMPTS", "5"))
 # Default daily alert limit for new users (0 = no limit). Users can change theirs in ⚙️ Settings.
 DEFAULT_MAX_PER_DAY = int(os.getenv("DEFAULT_MAX_PER_DAY", "30"))
-DIGEST_MAX_ARTICLES = int(os.getenv("DIGEST_MAX_ARTICLES", "15"))
 # Onboarding choices count as saved after this many minutes without a tap (no need to press Next / Done).
 ONBOARDING_AUTOSAVE_MINUTES = int(os.getenv("ONBOARDING_AUTOSAVE_MINUTES", "10"))

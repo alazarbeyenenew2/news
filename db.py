@@ -798,9 +798,8 @@ class Database:
         return list(best.items())
 
     def queue_notifications(self, article: Article, matches: list[tuple]) -> int:
-        """Queue one notification per (user, category[, matched technology[, match source]]). Users in
-        digest mode get it held for their digest;
-        users over their daily limit get it marked skipped. Unique constraints make this safe to repeat
+        """Queue one notification per (user, category[, matched technology[, match source]]). Users
+        over their daily limit get it marked skipped. Unique constraints make this safe to repeat
         (same article, or another article of the same story). Returns how many were newly queued."""
         if not matches:
             return 0
@@ -814,7 +813,7 @@ class Database:
             user = self.get_user(user_id)
             if not user:
                 continue
-            status = "digest" if user.delivery_mode == "digest" else "queued"
+            status = "queued"
             error = None
             if status == "queued" and user.max_per_day:
                 today = self._one(
@@ -926,34 +925,6 @@ class Database:
             " WHERE user_id = %s AND status IN ('queued', 'digest')", (reason, _now(), user_id))
         return cur.rowcount
 
-    def set_delivery_mode(self, user_id: int, mode: str) -> User:
-        """Instant -> digest: waiting alerts are held for the digest. Digest -> instant: the held ones are
-        dropped rather than sent as a burst."""
-        now = _now()
-        with self.transaction():
-            if mode == "digest":
-                self.execute("UPDATE notifications SET status = 'digest', updated_at = %s"
-                             " WHERE user_id = %s AND status = 'queued'", (now, user_id))
-            else:
-                self.execute("UPDATE notifications SET status = 'skipped', last_error = 'switched to instant',"
-                             " updated_at = %s WHERE user_id = %s AND status = 'digest'", (now, user_id))
-            self.execute("UPDATE users SET delivery_mode = %s, updated_at = %s WHERE telegram_id = %s",
-                         (mode, now, user_id))
-        return self.get_user(user_id)
-
-    def digest_users_due(self, local_hour: int, local_date: str) -> list[User]:
-        rows = self.execute(
-            """SELECT * FROM users WHERE delivery_mode = 'digest' AND status = 'active' AND notifications_enabled
-                   AND digest_hour = %s AND (last_digest_date IS NULL OR last_digest_date <> %s)""",
-            (local_hour, local_date)).fetchall()
-        return [_row(User, r) for r in rows]
-
-    def digest_items(self, user_id: int) -> list[tuple[Notification, Article]]:
-        rows = self.execute(
-            """SELECT n.id AS n_id, a.* FROM notifications n JOIN articles a ON a.id = n.article_id
-               WHERE n.user_id = %s AND n.status = 'digest' ORDER BY a.id DESC""", (user_id,)).fetchall()
-        return [(self.get_notification(r["n_id"]), _row(Article, r)) for r in rows]
-
     def failed_notifications(self, limit: int = 100) -> list[dict]:
         rows = self.execute(
             """SELECT n.*, a.title, u.first_name, u.username FROM notifications n
@@ -990,7 +961,6 @@ class Database:
                 (since, config.CLASSIFY_MIN_CONFIDENCE)),
             "queued": one("SELECT COUNT(*) FROM notifications WHERE status = 'queued'"),
             "queue_oldest": one("SELECT MIN(next_attempt_at) FROM notifications WHERE status = 'queued'"),
-            "held_for_digest": one("SELECT COUNT(*) FROM notifications WHERE status = 'digest'"),
             "sent_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'sent' AND sent_at >= %s", (since,)),
             "pulled_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'pulled' AND sent_at >= %s",
                                 (since,)),

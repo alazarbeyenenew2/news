@@ -26,7 +26,6 @@ CMD_START = "Start / main menu"
 CMD_INTERESTS = "Choose your topics"
 CMD_SOURCES = "News sources"
 CMD_LANGUAGE = "Change language"
-CMD_DIGEST = "Instant alerts or daily digest"
 CMD_PAUSE = "Pause alerts"
 CMD_RESUME = "Resume alerts"
 CMD_SETTINGS = "Settings"
@@ -77,34 +76,22 @@ def topic_removed(topic: str) -> str:
 TOPIC_NONE = "⬜ Clear"
 TOPIC_NEED_ONE = "Choose at least one topic, or tap “Skip for now”."
 
-DELIVERY_PROMPT = (f"📬 <b>How should news reach you?</b>\n{LINE}\n"
-                   "⚡ <b>Instant</b>: an alert for each new story, as soon as we find it.\n"
-                   "📰 <b>Daily digest</b>: one message a day with the day's stories.\n\n"
-                   "<i>You can change this later in ⚙️ Settings.</i>")
-DELIVERY_INSTANT = "⚡ Instant alerts"
-DELIVERY_DIGEST = "📰 Daily digest"
-DIGEST_NOW = "⚡ Get my digest now"
-DIGEST_NOW_LOADING = "⏳ Checking for the latest news…"
-DIGEST_NOW_EMPTY = ("📭 Nothing is waiting in your digest right now. New stories for your topics will be "
-                    "collected for your next digest — or tap 📥 Latest news to see today's stories.")
-DIGEST_NOW_FAILED = "⚠️ I couldn't send your digest just now. Please try again in a minute."
 
-
-def onboarding_done(topics: str, instant: bool, hour: int) -> str:
-    how = "⚡ instantly" if instant else f"📰 in a daily digest at {hour:02d}:00"
+def onboarding_done(topics: str) -> str:
     return (f"✅ <b>You're all set!</b>\n{LINE}\n"
-            f"Topics: {topics}\nYou'll get news {how}.\n\n"
+            f"Topics: {topics}\nYou'll get each story ⚡ as soon as it's published.\n\n"
             "Only stories published from now on are sent, so there's no flood of old news.\n"
             "Use the buttons below to change anything.")
 
 
-def auto_saved(topics: str, instant: bool, hour: int) -> str:
-    how = "⚡ instantly" if instant else f"📰 in a daily digest at {hour:02d}:00"
+def auto_saved(topics: str) -> str:
     return (f"✅ <b>Your choices are saved.</b>\n{LINE}\n"
-            f"Topics: {topics}\nYou'll get news {how}.\n\n"
+            f"Topics: {topics}\nYou'll get each story ⚡ as soon as it's published.\n\n"
             "Change anything with the buttons below: 🗞 My topics, 📚 Sources, ⚙️ Settings.")
 
 
+DIGEST_REMOVED = ("📰 The daily digest has been retired: every story now arrives ⚡ instantly, as soon as "
+                  "it's published. Tap 📥 Latest news any time for today's stories you haven't seen.")
 WELCOME_NEWS_INTRO = "📰 <b>The latest news</b> to get you started:"
 
 ONBOARDING_SKIPPED = (f"👌 No topics yet.\n{LINE}\n"
@@ -134,21 +121,15 @@ RESUMED_NO_TOPICS = "\n\n⚠️ You have no topics yet: tap <b>🗞 My topics</b
 SETTINGS_TITLE = "⚙️ <b>Settings</b>"
 ON = "✅ On"
 OFF = "⏸ Paused"
-INSTANT = "⚡ Instant"
 NO_LIMIT = "no limit"
 ANY_LANGUAGE = "All languages"
 NEWS_LANGUAGES = {"any": "🌐 All languages", "en": "🇬🇧 English only", "am": "🇪🇹 Amharic only"}
 
 
-def digest_at(hour: int) -> str:
-    return f"📰 Daily digest at {hour:02d}:00"
-
-
-def settings_text(alerts: str, delivery: str, limit: str, news_language: str, topics: int, muted: int) -> str:
+def settings_text(alerts: str, limit: str, news_language: str, topics: int, muted: int) -> str:
     muted_text = f" ({muted} muted)" if muted else ""
     return (f"{SETTINGS_TITLE}\n{LINE}\n"
             f"🔔 Alerts: <b>{alerts}</b>\n"
-            f"📬 Delivery: <b>{delivery}</b>\n"
             f"🔢 Daily limit: <b>{limit}</b>\n"
             f"🗣 News language: <b>{news_language}</b>\n"
             f"🗞 Topics: <b>{topics}</b>{muted_text}")
@@ -160,9 +141,6 @@ def limit_text(n: int) -> str:
 
 SET_PAUSE = "⏸ Pause"
 SET_RESUME = "▶️ Resume"
-SET_TO_DIGEST = "📰 Switch to digest"
-SET_TO_INSTANT = "⚡ Switch to instant"
-SET_HOUR = "🕗 Digest time"
 SET_LIMIT = "🔢 Daily limit"
 SET_NEWS_LANGUAGE = "🗣 News language"
 SET_MUTE = "🔕 Mute topics"
@@ -170,32 +148,12 @@ SET_TOPICS = "🗞 Topics"
 BACK = "⬅️ Back"
 CLOSE = "✖️ Close"
 
-HOUR_PROMPT = (f"🕗 <b>When should the daily digest arrive?</b>\n"
-               f"Choose ⚡ Instantly to get each story as soon as it's published.\n"
-               f"<i>Times are {config.TIMEZONE.key}.</i>")
-HOUR_INSTANT = "⚡ Instantly"
 LIMIT_PROMPT = ("🔢 <b>Most alerts per day</b>\nAfter this many, the rest of the day's stories are skipped "
                 "(they're not sent later).")
 NEWS_LANGUAGE_PROMPT = "🗣 <b>Which news languages do you want?</b>"
 MUTE_PROMPT = ("🔕 <b>Mute topics</b>\nA muted topic stays in your list but sends no alerts. "
                "Tap to mute or unmute.")
 MUTE_NONE = "You have no topics yet."
-
-# ---------- digest ----------
-def digest_menu(instant: bool, hour: int) -> str:
-    now = INSTANT if instant else digest_at(hour)
-    return (f"📰 <b>Daily digest</b>\n{LINE}\n"
-            f"Now: <b>{now}</b>\n\n"
-            "With the digest you get one message a day listing the stories for your topics, "
-            "instead of one alert per story.")
-
-
-def digest_title(day: str, count: int) -> str:
-    return f"📰 <b>Your daily digest</b> · {day}\n{count} {'story' if count == 1 else 'stories'}\n{LINE}"
-
-
-def digest_more(count: int) -> str:
-    return f"\n<i>…and {count} more.</i>"
 
 
 # ---------- alerts ----------
@@ -256,8 +214,7 @@ HELP = (f"❓ <b>How {BOT} works</b>\n{LINE}\n"
         "<b>Commands</b>\n"
         "/latest — today's stories you haven't seen yet (📥 Latest news)\n"
         "/interests — choose your topics\n"
-        "/settings — alerts, digest, daily limit, news language, sources\n"
-        "/digest — instant alerts or one daily digest\n"
+        "/settings — alerts, daily limit, news language, sources\n"
         "/pause, /resume — stop or restart alerts\n"
         "/sources — choose your news sources\n"
         "/cve — CVE reports: vulnerabilities in technologies you choose (nginx, Windows…)\n"
@@ -288,7 +245,7 @@ def admin_status(s: dict, web_hint: bool) -> str:
             f"📡 Sources: <b>{s['providers_enabled']}</b> on · {s['providers_failing']} failing\n"
             f"📰 Articles today: <b>{s['articles_today']}</b> · same story elsewhere {s['duplicates_today']}"
             f" · waiting for review {s['low_confidence_today']}\n"
-            f"📬 Queue: <b>{s['queued']}</b> (oldest {oldest}) · held for digests {s['held_for_digest']}\n"
+            f"📬 Queue: <b>{s['queued']}</b> (oldest {oldest})\n"
             f"✅ Sent today: <b>{s['sent_today']}</b> · 📥 pulled {s.get('pulled_today', 0)} · ❌ failed {s['failed_today']} · skipped {s['skipped_today']}\n"
             f"🛡 CVEs today: <b>{s.get('cves_today', 0)}</b> · users with CVE reports {s.get('cve_users', 0)}")
     if web_hint:

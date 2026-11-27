@@ -182,7 +182,6 @@ def chat(telegram):
     c.tap(f"tp:o:{db.category_by_key('sports').id}")
     c.tap("tps:o")
     c.tap("srx:o")
-    c.tap("ob:instant")
     yield c
     c.close()
 
@@ -367,8 +366,7 @@ def test_onboarding_with_cve_reports_asks_for_technologies(telegram):
         api = c.send("my-portal")
         assert "Your own" in api.last("sendMessage")["text"]
         api = c.tap("cv:onext")
-        assert "How should news reach you" in api.last("editMessageText")["text"]  # no topics: no sources step
-        c.tap("ob:instant")
+        assert "You're all set" in api.last("editMessageText")["text"]  # no topics: no sources step, done
         user = db.get_user(100)
         assert user.onboarding_completed and user.cve_alerts
         assert {t["name"] for t in db.user_technologies(100)} == {"Windows", "my-portal"}
