@@ -25,6 +25,7 @@ os.environ.update({
     "SECRET_KEY": "test-secret-key-test-secret-key-0000",
     "MESSAGES_PER_SECOND": "1000",
     "DEFAULT_MAX_PER_DAY": "30",
+    "NEWS_GAP_SECONDS": "0",
 })
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

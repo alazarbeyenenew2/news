@@ -7,7 +7,7 @@ from telegram import Update
 import texts
 import texts_am
 import texts_en
-from bot import build_application
+from bot import build_application, wait_for_batches
 from db import db
 from tests.conftest import callback_update, message_update
 
@@ -38,6 +38,7 @@ class Chat:
     def _process(self, data: dict):
         self.api.clear()
         self.loop.run_until_complete(self.app.process_update(Update.de_json(data, self.app.bot)))
+        self.loop.run_until_complete(wait_for_batches())  # news batches run in the background
         return self.api
 
     def close(self):
@@ -289,7 +290,7 @@ SPORTS = ["Arsenal win the north London derby", "Marathon record falls in Berlin
           "Formula 1 title race goes to final round"]
 
 
-def test_pull_latest_news_pages_and_never_repeats(chat):
+def test_pull_latest_news_sends_all_and_never_repeats(chat):
     onboard(chat, topics=("sports",))
     _stories("bbc_sport", "s", SPORTS)  # first fetch of the feed: stored as backlog, not alerted
     _stories("thehackernews", "c", ["Ransomware gang hits hospital network"])  # not their topic
@@ -297,15 +298,11 @@ def test_pull_latest_news_pages_and_never_repeats(chat):
 
     api = chat.send(texts_en.BTN_PULL)
     shown = _alerts(api)
-    assert len(shown) == 5 and SPORTS[0] in shown[0]  # newest first
+    assert len(shown) == 7 and SPORTS[0] in shown[0]  # all of them, newest first, no "show more" step
     assert not any("Ransomware" in t for t in shown)
-    summary = api.last("sendMessage")
-    assert "2 more waiting" in summary["text"]
-    assert summary["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "pull:more"
-
-    api = chat.tap("pull:more")
-    assert len(_alerts(api)) == 2 and "That's everything" in api.last("sendMessage")["text"]
+    assert "pull:more" not in str(api.calls) and "more waiting" not in str(api.calls)  # no count, no button
     assert set(_statuses().values()) == {"pulled"} and len(_statuses()) == 7
+    assert texts_en.PULL_NOTHING in chat.send(texts_en.BTN_PULL).last("sendMessage")["text"]
 
     api = chat.send("/latest")  # nothing new: nothing repeated
     assert _alerts(api) == [] and "up to date" in api.last("sendMessage")["text"]
@@ -537,6 +534,7 @@ def test_onboarding_choices_auto_save_after_ten_minutes(chat):
     _idle(200, 30)
     chat.api.clear()
     assert chat.loop.run_until_complete(autosave.run_once()) == 1
+    chat.loop.run_until_complete(wait_for_batches())
     user = db.get_user(USER)
     assert user.onboarding_completed and user.delivery_mode == "instant"
     assert set(db.interests(USER)) == {cid("sports")}
@@ -564,7 +562,7 @@ def test_new_users_get_ten_latest_stories(chat):
     _stories("bbc_sport", "s", titles)  # 13 sports stories today
     api = _join_with_sports(chat)
     assert len(_alerts(api)) == 10
-    assert any("3 more waiting" in (p.get("text") or "") for m, p in api.calls if m == "sendMessage")
+    assert "more waiting" not in str(api.calls)
 
 
 def test_welcome_news_tops_up_with_other_topics(chat):
@@ -602,3 +600,38 @@ def test_digest_migration_switches_everyone_to_instant():
     db.execute("UPDATE users SET delivery_mode = 'digest' WHERE telegram_id = 300")
     db.execute(Path("migrations/010_remove_daily_digest.sql").read_text())
     assert db.get_user(300).delivery_mode == "instant"
+
+
+def test_everyone_who_missed_it_gets_ten_stories(chat):
+    """Users who joined before (or saw fewer than 10 stories) get 10 of the latest once, a few a minute."""
+    from bot import OnboardingAutosave
+    onboard(chat, topics=("sports",))  # nothing collected yet: no welcome news, tried again later
+    assert db.get_user(USER).welcome_news_at is None
+    onboard(chat, user=300, topics=("sports",))
+    db.update_user(300, notifications_enabled=False)  # paused: left alone
+    _stories("bbc_sport", "s", SPORTS + ["Chelsea sign Brazilian striker on loan",
+                                         "Boxing champion defends heavyweight belt",
+                                         "Golf major heads into dramatic playoff",
+                                         "Cycling team crashes out of Tour stage"])
+    chat.api.clear()
+    autosave = OnboardingAutosave(chat.app.bot)
+    chat.loop.run_until_complete(autosave.run_once())
+    chat.loop.run_until_complete(wait_for_batches())
+    shown = [p for m, p in chat.api.calls if m == "sendMessage" and int(p["chat_id"]) == USER
+             and "Source" in (p.get("text") or "")]
+    assert len(shown) == 10 and db.get_user(USER).welcome_news_at is not None
+    assert not any(int(p.get("chat_id", 0) or 0) == 300 for m, p in chat.api.calls)
+    chat.api.clear()
+    chat.loop.run_until_complete(autosave.run_once())
+    chat.loop.run_until_complete(wait_for_batches())
+    assert _alerts(chat.api) == []  # only once
+
+
+def test_welcome_migration_resets_users_who_saw_fewer_than_ten():
+    from pathlib import Path
+
+    from db import now_utc
+    db.upsert_user(400, 400, None, "Few")
+    db.update_user(400, welcome_news_at=now_utc().isoformat())
+    db.execute(Path("migrations/011_welcome_news_for_everyone.sql").read_text())
+    assert db.get_user(400).welcome_news_at is None

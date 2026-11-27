@@ -63,10 +63,9 @@ SETTINGS = "st:"         # st:<screen or action>[:<value>]
 DIGEST = "dg:"           # buttons of the removed daily digest, in older messages
 ADMIN = "ad:"            # ad:<action>[:<id>][:<page>]
 BACKUP = "bk:"           # bk:now | bk:on | bk:off
-PULL_MORE = "pull:more"  # the "more" button under a 📥 Latest news batch
+PULL_MORE = "pull:more"  # the "Show more" button under older 📥 Latest news batches
+CATCH_UP_PER_MINUTE = 20  # users whose missing welcome news starts each minute
 NOOP = "noop"
-PULL_PAGE = 5  # stories per 📥 Latest news tap
-WELCOME_NEWS_COUNT = 10  # stories a new user gets when they join
 PULL_REFRESH_SECONDS = 12  # how long 📥 Latest news waits for the feeds it re-checks
 CVE = "cv:"  # cv:menu|on|off|all|sev[:<level>]|p:<page>|t:<page>:<tech id>|r:<page>:<hash>|add|addx|csv|close
 CVE_ADAPTERS = ("nvd", "kev")  # CVE providers: managed on the CVE screen, not in 📚 Sources
@@ -365,8 +364,7 @@ async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             else L.ONBOARDING_SKIPPED)
     await _show(update, context, text, None)
     await _send(context, update.effective_chat.id, L.MENU_HINT, main_keyboard(user))
-    if db.interests(user.telegram_id):
-        await send_welcome_news(context.bot, user)
+    start_welcome_news(context.bot, user)  # everyone gets the latest news, topics or not
 
 
 # ---------- news sources (onboarding step, 📚 Sources, settings) ----------
@@ -503,7 +501,7 @@ async def _finish_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE,
     await _show(update, context, L.onboarding_done(_topic_names(user)), None)
     await _send(context, update.effective_chat.id, L.MENU_HINT, main_keyboard(user))
     log.info("User %s finished onboarding", user.telegram_id)
-    await send_welcome_news(context.bot, user)
+    start_welcome_news(context.bot, user)
 
 
 async def onboarding_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -693,44 +691,71 @@ async def mute_from_alert(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 # ---------- 📥 latest news on demand ----------
+# News batches (📥 Latest news, welcome news) go out in the background, one story every NEWS_GAP_SECONDS,
+# so a long batch never holds up the bot for other users. One batch per user at a time.
+_batches: set[asyncio.Task] = set()
+_sending: set[int] = set()
+
+
+def _start_batch(user_id: int, job) -> bool:
+    """Run job() (an async function) in the background unless this user already has a batch going."""
+    if user_id in _sending:
+        return False
+    _sending.add(user_id)
+
+    async def run():
+        try:
+            await job()
+        except Exception:
+            log.exception("News batch for %s failed", user_id)
+        finally:
+            _sending.discard(user_id)
+
+    task = asyncio.get_running_loop().create_task(run())
+    _batches.add(task)
+    task.add_done_callback(_batches.discard)
+    return True
+
+
+async def wait_for_batches() -> None:
+    """Wait until every news batch has been sent (tests, shutdown)."""
+    while pending := [t for t in _batches if not t.done()]:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
 async def pull_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """📥 Latest news, /latest, or the "more" button: today's stories for the user's topics that they
-    haven't received yet, PULL_PAGE at a time, newest first. Works while alerts are paused too."""
+    """📥 Latest news or /latest: re-check the user's sources, then send today's stories for their topics
+    that they haven't received yet, newest first (up to LATEST_NEWS_MAX), one after another without any
+    "show more" step. Works while alerts are paused too."""
     user = await _active_user(update, context)
     if not user:
         return
     L = tr(user)
     chat_id = update.effective_chat.id
     query = update.callback_query
-    if query:
+    if query:  # the "Show more" button under older batches
         await query.answer()
         try:
-            await query.edit_message_reply_markup(None)  # the old "more" button can't be pressed twice
+            await query.edit_message_reply_markup(None)
         except TelegramError:
             pass
     if not any(db.interests(user.telegram_id).values()):
         await _send(context, chat_id, L.PULL_NO_TOPICS, main_keyboard(user))
         return
-    if context.user_data.get("pulling"):
-        return  # a pull for this user is already sending
-    context.user_data["pulling"] = True
-    try:
-        if not query:  # a fresh tap (not "more"): first check the user's sources for brand-new stories
-            await _refresh_sources(context, user, chat_id)
-        items, total = db.pull_candidates(user, day_start_utc(local_today()), PULL_PAGE)
+
+    async def job():
+        await _refresh_sources(context, user, chat_id)
+        items, _ = db.pull_candidates(user, day_start_utc(local_today()), config.LATEST_NEWS_MAX)
         if not items:
             await _send(context, chat_id, L.PULL_NOTHING, main_keyboard(user))
             return
-        sent = await _deliver_today(context.bot, user, items)
-        remaining = total - len(items)
-        log.info("User %s pulled %s stories (%s more waiting)", user.telegram_id, sent, remaining)
-        more = InlineKeyboardMarkup([[_button(L.pull_more(remaining), PULL_MORE)]]) if remaining else None
-        await _send(context, chat_id, L.pull_done(sent, remaining), more or main_keyboard(user))
-    finally:
-        context.user_data.pop("pulling", None)
+        sent = await _deliver_today(context.bot, user, items, gap=config.NEWS_GAP_SECONDS)
+        log.info("User %s pulled %s stories", user.telegram_id, sent)
+
+    _start_batch(user.telegram_id, job)  # a tap while a batch is still going is ignored
 
 
-async def _deliver_today(bot, user: User, items: list) -> int:
+async def _deliver_today(bot, user: User, items: list, gap: float = 0.3) -> int:
     """Send today's stories (from db.pull_candidates) to a user, each claimed first so nothing is sent
     twice; a failed one can be tried again later. Returns how many were sent."""
     providers = {p.id: p.name for p in db.providers()}
@@ -746,51 +771,52 @@ async def _deliver_today(bot, user: User, items: list) -> int:
         except TelegramError as e:
             db.unclaim_pulled(user.telegram_id, article, str(e))
             log.warning("Today's article %s to %s failed: %s", article.id, user.telegram_id, e)
-        await asyncio.sleep(0.3)  # keep a short burst gentle
+        if sent < len(items):
+            await asyncio.sleep(gap)  # one story at a time
     metrics.inc("news_pulled", sent)
     return sent
 
 
+def start_welcome_news(bot, user: User) -> None:
+    """send_welcome_news in the background."""
+    _start_batch(user.telegram_id, lambda: send_welcome_news(bot, user))
+
+
 async def send_welcome_news(bot, user: User) -> int:
-    """Once per user, when onboarding is done (finished or auto-saved): at least WELCOME_NEWS_COUNT of the
-    latest stories, so a new user sees the bot working straight away. Today's stories for their topics
-    come first; if there aren't enough, the last 24 hours for their topics, then today's latest from other
-    topics. 📥 Show more offers the rest of today's for their topics. Returns how many were sent."""
+    """Once per user (when onboarding is done, or once for anyone who has seen fewer than
+    WELCOME_NEWS_COUNT stories): WELCOME_NEWS_COUNT of the latest stories they haven't received, one after
+    another. Today's for their topics come first; if there aren't enough, the last 24 hours for their
+    topics, then today's latest from other topics. If nothing is available yet it's tried again later.
+    Returns how many were sent."""
+    user = db.get_user(user.telegram_id) or user
     if user.welcome_news_at:
         return 0
-    db.update_user(user.telegram_id, welcome_news_at=now_utc().isoformat())
     L = tr(user)
     today = day_start_utc(local_today())
-    items, total = db.pull_candidates(user, today, WELCOME_NEWS_COUNT)
-    topic_items = len(items)
+    items, _ = db.pull_candidates(user, today, config.WELCOME_NEWS_COUNT)
     seen = {a.story_cluster_id or a.id for a, _ in items}
-    fills = [(user, (now_utc() - timedelta(hours=24)).isoformat(), False), (user, today, True)]
-    for who, since, any_topic in fills:
-        if len(items) >= WELCOME_NEWS_COUNT:
+    fills = [((now_utc() - timedelta(hours=24)).isoformat(), False), (today, True)]
+    for since, any_topic in fills:
+        if len(items) >= config.WELCOME_NEWS_COUNT:
             break
-        more_items, _ = db.pull_candidates(who, since, WELCOME_NEWS_COUNT * 3, any_topic=any_topic)
+        more_items, _ = db.pull_candidates(user, since, config.WELCOME_NEWS_COUNT * 3, any_topic=any_topic)
         for article, category_id in more_items:
-            if len(items) >= WELCOME_NEWS_COUNT:
+            if len(items) >= config.WELCOME_NEWS_COUNT:
                 break
             if (article.story_cluster_id or article.id) not in seen:
                 seen.add(article.story_cluster_id or article.id)
                 items.append((article, category_id))
     if not items:
-        return 0
+        return 0  # nothing collected yet: the background loop tries again in a minute
+    db.update_user(user.telegram_id, welcome_news_at=now_utc().isoformat())
     try:
-        await bot.send_message(user.chat_id, L.WELCOME_NEWS_INTRO, parse_mode=ParseMode.HTML)
+        await bot.send_message(user.chat_id, L.WELCOME_NEWS_INTRO, parse_mode=ParseMode.HTML,
+                               reply_markup=main_keyboard(user))
     except TelegramError as e:
         log.warning("Welcome news to %s failed: %s", user.telegram_id, e)
         return 0
-    sent = await _deliver_today(bot, user, items)
-    remaining = max(total - topic_items, 0)
-    more = InlineKeyboardMarkup([[_button(L.pull_more(remaining), PULL_MORE)]]) if remaining else main_keyboard(user)
-    try:
-        await bot.send_message(user.chat_id, L.pull_done(sent, remaining), parse_mode=ParseMode.HTML,
-                               reply_markup=more)
-    except TelegramError:
-        pass
-    log.info("Sent %s of today's stories to %s after onboarding", sent, user.telegram_id)
+    sent = await _deliver_today(bot, user, items, gap=config.NEWS_GAP_SECONDS)
+    log.info("Sent %s welcome stories to %s", sent, user.telegram_id)
     return sent
 
 
@@ -798,7 +824,9 @@ class OnboardingAutosave:
     """Every minute: people who chose topics (or CVE reports) during onboarding but never tapped
     ➡️ Next / Done get their choices saved after ONBOARDING_AUTOSAVE_MINUTES without a tap. Their
     remaining steps take the defaults (every source on, instant alerts); they're told so, get the main
-    keyboard, and get today's news they haven't received."""
+    keyboard, and get today's news they haven't received. Also, a few at a time: anyone who finished
+    onboarding but hasn't had their welcome news yet (joined before it existed, saw fewer than
+    WELCOME_NEWS_COUNT stories, or nothing was collected when they joined) gets it now."""
 
     def __init__(self, bot):
         self.bot = bot
@@ -827,8 +855,10 @@ class OnboardingAutosave:
                 log.warning("Auto-save message to %s failed: %s", user.telegram_id, e)
                 continue
             log.info("Auto-saved onboarding for %s after %s min", user.telegram_id, config.ONBOARDING_AUTOSAVE_MINUTES)
-            await send_welcome_news(self.bot, user)
+            start_welcome_news(self.bot, user)
             done += 1
+        for user in db.welcome_news_due(limit=CATCH_UP_PER_MINUTE):
+            start_welcome_news(self.bot, user)
         return done
 
 

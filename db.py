@@ -455,6 +455,13 @@ class Database:
             (idle_since,)).fetchall()
         return [_row(User, r) for r in rows]
 
+    def welcome_news_due(self, limit: int = 20) -> list[User]:
+        """Onboarded, active users with alerts on who haven't had their welcome news yet."""
+        rows = self.execute(
+            """SELECT * FROM users WHERE onboarding_completed AND status = 'active' AND notifications_enabled
+                 AND welcome_news_at IS NULL ORDER BY created_at LIMIT %s""", (limit,)).fetchall()
+        return [_row(User, r) for r in rows]
+
     def admin_ids(self) -> list[int]:
         rows = self.execute("SELECT telegram_id, role FROM users WHERE status = 'active'").fetchall()
         return [r["telegram_id"] for r in rows

@@ -314,15 +314,6 @@ PULL_NO_TOPICS = "🗞 መጀመሪያ ርዕሶችዎን ይምረጡ፦ <b>�
 PULL_NOTHING = "✅ <b>ሁሉንም አይተዋል።</b>\nለርዕሶችዎ ዛሬ አዲስ ዜና የለም። አዳዲሶች እዚህ ይደርሳሉ።"
 
 
-def pull_done(sent: int, remaining: int) -> str:
-    text = f"📥 ከዛሬ {sent} ዜናዎች።"
-    return text + (f"\nሌሎች {remaining} ይጠብቃሉ።" if remaining else "\n✅ እስካሁን ያሉት የዛሬ ዜናዎች እነዚህ ናቸው።")
-
-
-def pull_more(remaining: int) -> str:
-    return f"📥 ተጨማሪ አሳይ ({remaining})"
-
-
 # ---------- 🛡 CVE reports ----------
 BTN_CVE = "🛡 የCVE ሪፖርቶች"
 CMD_CVE = "ለቴክኖሎጂዎችዎ የCVE ሪፖርቶች"

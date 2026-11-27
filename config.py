@@ -76,3 +76,9 @@ MAX_SEND_ATTEMPTS = int(os.getenv("MAX_SEND_ATTEMPTS", "5"))
 DEFAULT_MAX_PER_DAY = int(os.getenv("DEFAULT_MAX_PER_DAY", "30"))
 # Onboarding choices count as saved after this many minutes without a tap (no need to press Next / Done).
 ONBOARDING_AUTOSAVE_MINUTES = int(os.getenv("ONBOARDING_AUTOSAVE_MINUTES", "10"))
+# 📥 Latest news and the welcome news are sent one story at a time with this gap, in the background.
+NEWS_GAP_SECONDS = float(os.getenv("NEWS_GAP_SECONDS", "3"))
+# Most stories one 📥 Latest news tap sends (tap again for newer ones).
+LATEST_NEWS_MAX = int(os.getenv("LATEST_NEWS_MAX", "30"))
+# Every user gets at least this many stories: after joining, and once for anyone who has seen fewer.
+WELCOME_NEWS_COUNT = int(os.getenv("WELCOME_NEWS_COUNT", "10"))

@@ -316,15 +316,6 @@ PULL_NO_TOPICS = "🗞 Choose your topics first: tap <b>🗞 My topics</b>."
 PULL_NOTHING = "✅ <b>You're up to date.</b>\nNo new stories today for your topics. New ones will arrive here."
 
 
-def pull_done(sent: int, remaining: int) -> str:
-    text = f"📥 {sent} {'story' if sent == 1 else 'stories'} from today."
-    return text + (f"\n{remaining} more waiting." if remaining else "\n✅ That's everything for today so far.")
-
-
-def pull_more(remaining: int) -> str:
-    return f"📥 Show more ({remaining})"
-
-
 # ---------- 🛡 CVE reports ----------
 BTN_CVE = "🛡 CVE reports"
 CMD_CVE = "CVE reports for your technologies"
