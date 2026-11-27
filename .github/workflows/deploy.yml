@@ -16,6 +16,7 @@
 #                        python3 -c "import secrets; print(secrets.token_hex(32))"       (required)
 #   POSTGRES_USER        database user name, e.g. newsbot (fixed after the first deploy)  (required)
 #   POSTGRES_PASSWORD    database password; changing it later updates the database too   (required)
+#   NVD_API_KEY          NIST NVD API key for CVE reports (higher rate limit)             (optional)
 #
 # Repository variables (same page -> Variables):
 #   SUPER_ADMIN_IDS      your Telegram user ID(s), comma separated                       (required)
@@ -169,6 +170,7 @@ jobs:
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB || 'newsbot' }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
           TIMEZONE: ${{ vars.TIMEZONE || 'Africa/Addis_Ababa' }}
           CLASSIFY_MIN_CONFIDENCE: ${{ vars.CLASSIFY_MIN_CONFIDENCE }}
           MAX_ARTICLE_AGE_HOURS: ${{ vars.MAX_ARTICLE_AGE_HOURS }}
@@ -191,7 +193,7 @@ jobs:
             echo "::error::POSTGRES_DB must be lowercase letters, digits and _."; exit 1
           fi
           for name in BOT_TOKEN BOT_NAME SUPER_ADMIN_IDS ADMIN_USERNAME ADMIN_PASSWORD SECRET_KEY \
-                      POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB TIMEZONE \
+                      POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB NVD_API_KEY TIMEZONE \
                       CLASSIFY_MIN_CONFIDENCE MAX_ARTICLE_AGE_HOURS ARTICLE_RETENTION_DAYS DEFAULT_MAX_PER_DAY \
                       MESSAGES_PER_SECOND ADMIN_PORT DOMAIN; do
             value=${!name}

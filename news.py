@@ -33,6 +33,20 @@ class RawArticle:
     published_at: datetime | None = None
     language: str | None = None
     categories: list[str] = field(default_factory=list)  # provider tags
+    extra: dict = field(default_factory=dict)  # adapter-specific data, e.g. {"cve": {...}} from the NVD adapter
+
+
+class FetchError(Exception):
+    """A provider answered, but not with something usable (e.g. HTTP 500, not a feed)."""
+
+
+@dataclass
+class FetchResult:
+    """What an adapter returns: the items, plus caching headers for the next conditional request."""
+    items: list[RawArticle] = field(default_factory=list)
+    etag: str | None = None
+    last_modified: str | None = None
+    not_modified: bool = False
 
 
 # ---------- RSS / Atom ----------
@@ -227,6 +241,7 @@ def normalize(raw: RawArticle, provider_language: str, now: datetime, max_age: t
         "content_hash": hashlib.sha256(f"{title}\n{summary}\n{url}".encode("utf-8")).hexdigest(),
         "is_backlog": now - reference > max_age,
         "tags": [clean_text(t)[:80] for t in raw.categories if clean_text(t)][:20],
+        "extra": raw.extra,
     }
 
 
@@ -301,3 +316,22 @@ class RuleClassifier:
             reason = "; ".join(f"{label} ({value:.2f})" for value, label in evidence[:8])
             results.append((rule.id, confidence, CLASSIFIER_VERSION, reason))
         return sorted(results, key=lambda r: -r[1])
+
+
+# ---------- CVE technology matching ----------
+_TERM_PATTERNS: dict[str, re.Pattern] = {}
+
+
+def cve_term_matches(text: str, aliases: list[str]) -> bool:
+    """Whether any of a technology's names appears in the text as a whole word / phrase, any case
+    ("nginx" matches "NGINX Plus" but not "nginxy")."""
+    folded = text.casefold()
+    for alias in aliases:
+        alias = (alias or "").strip()
+        if not alias:
+            continue
+        if alias not in _TERM_PATTERNS:
+            _TERM_PATTERNS[alias] = _keyword_pattern(alias)
+        if _TERM_PATTERNS[alias].search(folded):
+            return True
+    return False

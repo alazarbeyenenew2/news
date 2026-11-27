@@ -239,6 +239,7 @@ HELP = (f"❓ <b>{BOT} እንዴት ይሠራል</b>\n{LINE}\n"
         "/digest — ፈጣን ማሳወቂያ ወይስ ዕለታዊ ማጠቃለያ\n"
         "/pause, /resume — ማሳወቂያ አቁም ወይም ቀጥል\n"
         "/sources — የዜና ምንጮችዎን ይምረጡ\n"
+        "/cve — የCVE ሪፖርቶች፦ በመረጧቸው ቴክኖሎጂዎች (nginx, Windows…) ላይ ያሉ ክፍተቶች\n"
         "/language — የቦቱን ቋንቋ ቀይር\n\n"
         "<i>አንድ ዜና ከብዙ ምንጮች ቢመጣም አንድ ጊዜ ብቻ ይላካል። ርዕሶችዎ ስለ አመለካከትዎ ምንም አይናገሩም፤ "
         "ማሳወቂያዎን ለመምረጥ ብቻ ያገለግላሉ።</i>")
@@ -260,7 +261,8 @@ def admin_status(s: dict, web_hint: bool) -> str:
             f"📰 የዛሬ ዜናዎች፦ <b>{s['articles_today']}</b> · በሌላ ምንጭ የተደገሙ {s['duplicates_today']}"
             f" · ግምገማ የሚጠብቁ {s['low_confidence_today']}\n"
             f"📬 ወረፋ፦ <b>{s['queued']}</b> (የቆየው {oldest}) · ለማጠቃለያ የተያዙ {s['held_for_digest']}\n"
-            f"✅ ዛሬ የተላኩ፦ <b>{s['sent_today']}</b> · 📥 የተጠየቁ {s.get('pulled_today', 0)} · ❌ ያልተሳኩ {s['failed_today']} · የተዘለሉ {s['skipped_today']}")
+            f"✅ ዛሬ የተላኩ፦ <b>{s['sent_today']}</b> · 📥 የተጠየቁ {s.get('pulled_today', 0)} · ❌ ያልተሳኩ {s['failed_today']} · የተዘለሉ {s['skipped_today']}\n"
+            f"🛡 የዛሬ CVEዎች፦ <b>{s.get('cves_today', 0)}</b> · የCVE ሪፖርት የሚቀበሉ {s.get('cve_users', 0)}")
     if web_hint:
         text += "\n\n<i>ተጨማሪ (የዜና ምድቦች፣ ቁልፍ ቃላት፣ ተጠቃሚዎች) በድረ-ገጹ የአስተዳደር ገጽ ላይ።</i>"
     return text
@@ -336,3 +338,90 @@ def pull_done(sent: int, remaining: int) -> str:
 
 def pull_more(remaining: int) -> str:
     return f"📥 ተጨማሪ አሳይ ({remaining})"
+
+
+# ---------- 🛡 CVE reports ----------
+BTN_CVE = "🛡 የCVE ሪፖርቶች"
+CMD_CVE = "ለቴክኖሎጂዎችዎ የCVE ሪፖርቶች"
+SET_CVE = "🛡 የCVE ሪፖርቶች"
+CVE_TITLE = "የCVE ሪፖርት"
+SEVERITY_NAMES = {"CRITICAL": "እጅግ ከባድ", "HIGH": "ከባድ", "MEDIUM": "መካከለኛ", "LOW": "ዝቅተኛ", "NONE": "የለም"}
+SEVERITY_UNKNOWN = "ገና አልተገመገመም"
+KEV_LABEL = "በጥቃት ላይ የዋለ"
+RANSOMWARE_LABEL = "💀 በራንሰምዌር ጥቅም ላይ የዋለ"
+CVE_MATCHES = "የተገናኘው"
+CVE_ALL_TECH = "ሁሉም ቴክኖሎጂዎች"
+CVE_DETAILS = "📖 ዝርዝር (NVD)"
+CVE_SETTINGS_BUTTON = "🛡 የCVE ቅንብሮች"
+CVE_TURN_ON = "🔔 አብራ"
+CVE_TURN_OFF = "⏸ አጥፋ"
+CVE_PICK = "🧩 ታዋቂ ቴክኖሎጂዎች"
+CVE_ADD = "✍️ የራስዎን ይጨምሩ"
+CVE_ALL = "ሁሉም ቴክኖሎጂዎች"
+CVE_SEVERITY = "⚠️ ዝቅተኛው ክብደት"
+CVE_CSV = "📄 የCSV ሪፖርት"
+CVE_CANCEL = "✖️ ሰርዝ"
+CVE_MIN_SEVERITY_LABELS = {"CRITICAL": "🔴 እጅግ ከባድ ብቻ", "HIGH": "🟠 ከባድና ከዚያ በላይ",
+                           "MEDIUM": "🟡 መካከለኛና ከዚያ በላይ", "ALL": "⚪ ሁሉም"}
+CVE_SEVERITY_PROMPT = ("⚠️ <b>ዝቅተኛው ክብደት</b>\nከዚህ የCVSS ክብደት በታች ያሉ CVEዎች አይላኩም። "
+                       "CISA በጥቃት ላይ የዋሉ ያላቸው ሁልጊዜ ይላካሉ።")
+CVE_PICK_HINT = "<i>ለመጨመር ወይም ለማስወገድ ይንኩ። ለሌሎች ቡድኖች ◀️ ▶️።</i>"
+CVE_OWN_GROUP = "የራስዎ"
+CVE_OWN_HINT = "<i>ለማስወገድ ይንኩ።</i>"
+CVE_OWN_EMPTY = "<i>እስካሁን የለም። እንደ nginx ወይም Windows Server 2022 ያሉ ስሞችን ለመጻፍ ✍️ የራስዎን ይጨምሩ ይንኩ።</i>"
+CVE_ADD_PROMPT = ("✍️ <b>የራስዎን ቴክኖሎጂዎች ይጨምሩ</b>\n"
+                  "ስሞቻቸውን በኮማ ወይም በተለያዩ መስመሮች ይላኩ፤ ለምሳሌ፦\n"
+                  "<code>nginx, Windows Server 2022, FortiGate, Moodle</code>\n\n"
+                  "<i>CVE የሚገናኘው መግለጫው ከነዚህ አንዱን እንደ ሙሉ ቃል ሲጠቅስ ነው።</i>")
+CVE_ADD_CANCELLED = "✖️ ተሰርዟል"
+CVE_TECH_GONE = "ይህ ቴክኖሎጂ ከዝርዝርዎ የለም።"
+CVE_ON_TOAST = "🔔 የCVE ሪፖርቶች በርተዋል"
+CVE_OFF_TOAST = "⏸ የCVE ሪፖርቶች ጠፍተዋል"
+CVE_ALL_ON = "✅ ሁሉም ቴክኖሎጂዎች"
+CVE_ALL_OFF = "⬜ የእርስዎ ቴክኖሎጂዎች ብቻ"
+CVE_CSV_EMPTY = "እስካሁን የCVE ሪፖርት የለም። ከቴክኖሎጂዎችዎ ጋር የሚገናኝ ሲኖር እዚህ ይታያል።"
+
+
+def cve_screen(on: bool, severity: str, techs: list[str], all_tech: bool) -> str:
+    if all_tech:
+        tech_text = "<b>ሁሉም ቴክኖሎጂዎች</b>"
+    elif techs:
+        shown = ", ".join(techs[:25]) + (f" እና ሌሎች {len(techs) - 25}" if len(techs) > 25 else "")
+        tech_text = f"<b>{len(techs)}</b>፦ {shown}"
+    else:
+        tech_text = "<b>እስካሁን የለም</b>፦ ከታች 🧩 ወይም ✍️ ይንኩ"
+    return (f"🛡 <b>የCVE ሪፖርቶች</b>\n"
+            "በሚጠቀሙባቸው ቴክኖሎጂዎች ላይ አዲስ ስለወጡ የደህንነት ክፍተቶች (CVE) ማሳወቂያ፣ ከNIST ብሔራዊ የክፍተቶች "
+            "ዳታቤዝ። ⚠️ CISA በጥቃት ላይ የዋሉ ያላቸውን ያመለክታል፤ እነሱ ሁልጊዜ ይላካሉ።\n"
+            f"{LINE}\n"
+            f"🔔 ማሳወቂያ፦ <b>{'✅ በርቷል' if on else '⏸ ጠፍቷል'}</b>\n"
+            f"⚠️ ዝቅተኛው ክብደት፦ <b>{severity}</b>\n"
+            f"🧩 ቴክኖሎጂዎች፦ {tech_text}")
+
+
+def cve_picker_title(group: str, page: int, pages: int, count: int) -> str:
+    return f"🧩 <b>{group}</b> · {page}/{pages}\n<i>በዝርዝርዎ፦ {count}</i>"
+
+
+def tech_added(name: str) -> str:
+    return f"✅ {name} ተጨምሯል"
+
+
+def tech_removed(name: str) -> str:
+    return f"⬜ {name} ተወግዷል"
+
+
+def cve_added(added: list[str], existing: list[str], skipped: list[str]) -> str:
+    lines = []
+    if added:
+        lines.append("✅ <b>ተጨምረዋል፦</b> " + ", ".join(added))
+    if existing:
+        lines.append("ℹ️ ቀድሞውኑ በዝርዝርዎ አሉ፦ " + ", ".join(existing))
+    if skipped:
+        lines.append("⚠️ አልተጨመሩም (2-50 ፊደላት፣ ቁጥሮች፣ ክፍተቶች ወይም . + # / -፤ ቢበዛ 50 የራስዎ)፦ "
+                     + ", ".join(skipped))
+    return "\n".join(lines) or "የሚጨመር የለም።"
+
+
+def cve_csv_caption(count: int) -> str:
+    return f"📄 <b>የCVE ሪፖርት</b>፦ የመጨረሻዎቹ {count} የCVE ማሳወቂያዎችዎ"

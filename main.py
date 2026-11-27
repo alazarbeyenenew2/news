@@ -14,7 +14,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 import config  # noqa: E402
 from bot import build_application, nightly_backup_loop  # noqa: E402
 from collector import Collector  # noqa: E402
-from db import db, load_seed  # noqa: E402
+from db import db, load_seed, load_technologies  # noqa: E402
 from delivery import Digester, Sender  # noqa: E402
 from web import create_web_app  # noqa: E402
 
@@ -29,8 +29,10 @@ async def lifespan(app: FastAPI):
              else "up to date", db.schema_version())
     # 2. Topics and providers new in seed/ (existing ones are left as the admins set them).
     added_categories, added_providers = db.seed(*load_seed())
-    if added_categories or added_providers:
-        log.info("Seeded %s topics and %s providers", added_categories, added_providers)
+    added_technologies = db.seed_technologies(load_technologies()[1])
+    if added_categories or added_providers or added_technologies:
+        log.info("Seeded %s topics, %s providers and %s technologies", added_categories, added_providers,
+                 added_technologies)
 
     tg_app = build_application()
     await tg_app.initialize()

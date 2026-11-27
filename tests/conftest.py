@@ -31,13 +31,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest  # noqa: E402
 from telegram.request import BaseRequest, RequestData  # noqa: E402
 
-from db import db, load_seed  # noqa: E402
+from db import db, load_seed, load_technologies  # noqa: E402
 
 db.migrate()  # as main.py does at startup
 
 FIXTURES = Path(__file__).parent / "fixtures"
-TABLES = ["notifications", "article_categories", "articles", "user_interests", "user_source_exclusions", "users",
-          "providers",
+TABLES = ["notifications", "article_categories", "cves", "articles", "user_interests", "user_source_exclusions",
+          "user_technologies", "technologies", "users", "providers",
           "categories", "settings"]
 
 
@@ -46,6 +46,7 @@ def fresh_db():
     """Every test starts with an empty database plus the seed topics and providers."""
     db.execute(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE")
     db.seed(*load_seed())
+    db.seed_technologies(load_technologies()[1])
     yield db
 
 
@@ -84,7 +85,10 @@ class FakeTelegram(BaseRequest):
     async def do_request(self, url, method, request_data: RequestData | None = None, read_timeout=None,
                          write_timeout=None, connect_timeout=None, pool_timeout=None):
         name = url.rsplit("/", 1)[-1]
-        params = request_data.parameters if request_data else {}
+        params = dict(request_data.parameters) if request_data else {}
+        if request_data and request_data.multipart_data:
+            # Uploaded files: {field: (file name, bytes, mime type)}
+            params["_files"] = dict(request_data.multipart_data)
         self.calls.append((name, params))
         for i, (failing, error) in enumerate(self.fail):
             if failing == name:

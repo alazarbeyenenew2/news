@@ -10,7 +10,7 @@ It's built the same way as the report bot: Python, [python-telegram-bot](https:/
 
 **Onboarding.** After the language, new users get a topic picker: tap topics to tick them (✅ / ⬜, **☑️ Select all**, **⬜ Clear**), then **➡️ Next**. Every tap is saved at once and answered with a short pop-up ("✅ 🔐 Cybersecurity added"), and the selected count updates as you go. **➡️ Next** needs at least one topic; **Skip for now** finishes without topics and explains how to choose later. Next comes **📚 Choose your news sources**: the sources that cover the chosen topics, **all ✅ on by default**. Tap to turn one off (saved at once, with a pop-up; the last one left on can't be turned off), then **➡️ Next**, or **⏭ Skip (all sources)**. Then they pick **⚡ Instant alerts** or **📰 Daily digest**, and get the main keyboard. Returning users aren't onboarded again and keep their settings.
 
-**Keyboard and commands.** Everyone gets **📥 Latest news**, **🗞 My topics**, **⚙️ Settings**, **⏸ Pause alerts / ▶️ Resume alerts**, **📰 Digest**, **📚 Sources**, **❓ Help** and **🌐 Language**; admins also get **🛠 Admin**. Commands: `/start`, `/latest`, `/interests`, `/settings`, `/digest`, `/pause`, `/resume`, `/sources`, `/language`, `/help`, `/admin` (admins), `/backup` (super admins). Menus update the same message instead of sending new ones. Menus and checkbox lists (✅ / ⬜) are laid out as a grid ([`keyboards.py`](keyboards.py)): three buttons to a row when the labels are short, two when they're medium, one when a label is too long to share a row (in checkbox lists those go last). Amharic letters count as wider, so Amharic menus get fewer per row when needed.
+**Keyboard and commands.** Everyone gets **📥 Latest news**, **🛡 CVE reports**, **🗞 My topics**, **⚙️ Settings**, **⏸ Pause alerts / ▶️ Resume alerts**, **📰 Digest**, **📚 Sources**, **❓ Help** and **🌐 Language**; admins also get **🛠 Admin**. Commands: `/start`, `/latest`, `/cve`, `/interests`, `/settings`, `/digest`, `/pause`, `/resume`, `/sources`, `/language`, `/help`, `/admin` (admins), `/backup` (super admins). Menus update the same message instead of sending new ones. Menus and checkbox lists (✅ / ⬜) are laid out as a grid ([`keyboards.py`](keyboards.py)): three buttons to a row when the labels are short, two when they're medium, one when a label is too long to share a row (in checkbox lists those go last). Amharic letters count as wider, so Amharic menus get fewer per row when needed.
 
 **Settings** (`/settings`): pause / resume; instant or daily digest and its hour; a daily alert limit (10, 20, 30, 50, 100 or none; default `DEFAULT_MAX_PER_DAY`); news language (all, English only, Amharic only); **📚 Sources** (the same screen as **📚 Sources** / `/sources`: turn sources on or off; one switch per publisher, new sources start on). In 🗞 My topics and 📚 Sources each tap is saved at once with a pop-up, and **✅ Done** closes the picker; **🔕 Mute topics** (a muted topic stays in the list but sends nothing). Changes apply right away, including to alerts already waiting to be sent.
 
@@ -35,6 +35,15 @@ Two to four sentences from the provider's own description.
 - Paused users get nothing, and stories found while paused aren't sent later. People who block the bot are noticed and not messaged again until they write to it.
 
 **📥 Latest news** (or `/latest`) first re-checks your sources (those covering your topics, minus any you turned off) that weren't checked in the last minute, waiting up to 12 s, so brand-new stories come straight away; then it sends today's stories (since 00:00 `TIMEZONE`) for your topics that you haven't received yet, newest first, 5 at a time with a **📥 Show more** button. It includes stories that weren't alerted: found while you were paused, over your daily limit, waiting for your digest, or found before you chose the topic. Muted topics are left out. Each story still comes once: a pulled story is never alerted later, and tapping again only brings new ones. Pulled stories don't count toward the daily limit. If one fails to send, the next tap tries it again. An alert the sender is about to deliver is left to it, so nothing arrives twice.
+
+**🛡 CVE reports** (or `/cve`) are alerts for newly published vulnerabilities in the technologies a user runs, separate from the news topics:
+- **Technologies**: tick them on **🧩 Popular technologies** (about 60, in groups: operating systems, web servers, browsers, databases, network devices, business apps, DevOps, CMS; ◀️ ▶️ between groups), type your own with **✍️ Add your own** (`nginx, Windows Server 2022, FortiGate`; a name in the catalog ticks the catalog entry), or choose **All technologies**. Every tap is saved at once with a pop-up; picking a technology turns CVE reports on.
+- **⚠️ Minimum severity**: Critical only, High and above (default), Medium and above, or All (CVSS). CVEs CISA lists as **actively exploited** are always sent.
+- **Alert**: severity and CVSS score, ⚠️ actively exploited / 💀 ransomware when CISA says so, the CVE id and description, which of your technologies matched, the publication time, **📖 Details (NVD)** and **🛡 CVE settings**.
+- **📄 CSV report**: your CVE alerts as a spreadsheet (CVE, published, severity, score, exploited, ransomware, matched technology, description, NVD link).
+- CVE alerts follow pause, digest, daily limit and "never twice", and only CVEs found after you chose a technology are sent. They never go into the Cybersecurity topic, so topic followers aren't flooded with the ~400 CVEs published a day.
+- Data: NIST's [National Vulnerability Database](https://nvd.nist.gov) CVE API (every 15 min) and CISA's [Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) catalog (hourly), both public US-government sources. A CVE seen in both is one alert; when CISA adds a CVE later, people it now qualifies for are alerted. Set `NVD_API_KEY` (optional secret) for NIST's higher rate limit.
+- Matching looks for the technology's names as whole words in the CVE's description (and NVD's product list once NIST has analysed it, usually days later). So a CVE that only *mentions* a technology (a WordPress plugin "on nginx servers") can match too. Rejected CVEs are skipped; CVEs with no severity yet are sent only to users who chose "All". The catalog is in [`seed/technologies.json`](seed/technologies.json).
 
 Topic choices are only used to pick alerts. They aren't used to guess anyone's views or for anything else.
 
@@ -141,6 +150,7 @@ Same as the report bot: all production configuration lives in GitHub (**Settings
 | `ADMIN_PASSWORD` | web admin page password (12+ characters): `python3 -c "import secrets; print(secrets.token_urlsafe(16))"` |
 | `SECRET_KEY` | `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `POSTGRES_USER` | database user name, e.g. `newsbot` (lowercase letters, digits, `_`) |
+| `NVD_API_KEY` | optional: NIST NVD API key for CVE reports ([request one](https://nvd.nist.gov/developers/request-an-api-key)) |
 | `POSTGRES_PASSWORD` | database password: `python3 -c "import secrets; print(secrets.token_urlsafe(24))"` (no `'` or line breaks) |
 
 | Variable | Default | Value |
@@ -198,6 +208,7 @@ Logs (`docker compose logs -f bot`) record fetches, failures and every admin cha
 | `texts_am.py`, `texts_en.py`, `texts.py` | Every text the bot shows, in Amharic and English |
 | `web.py`, `templates/` | Web admin page, `/health`, `/ready`, `/metrics` |
 | `keyboards.py` | Lays inline buttons out in a 1–3 column grid |
+| `cves.py`, `seed/technologies.json` | CVE reports: NVD and CISA KEV adapters, the technology catalog |
 | `metrics.py`, `backup.py`, `config.py` | Counters, zipped backups, settings from `.env` |
 | `tests/` | Tests and feed fixtures |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Container deployment (optional HTTPS via Caddy) |

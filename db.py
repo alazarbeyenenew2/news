@@ -71,6 +71,10 @@ class User:
     created_at: str
     updated_at: str
     last_seen_at: str
+    cve_alerts: bool = False
+    cve_enabled_at: str | None = None
+    cve_all_technologies: bool = False
+    cve_min_severity: str = "HIGH"
 
     @property
     def is_super_admin(self) -> bool:
@@ -176,6 +180,40 @@ class Notification:
     sent_at: str | None
     created_at: str
     updated_at: str
+    matched: str | None = None  # CVE alerts: which of the user's technologies matched
+
+
+# CVE severity, lowest to highest; a user's minimum is one of CVE_MIN_SEVERITIES.
+SEVERITY_RANK = {None: 0, "NONE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+CVE_MIN_SEVERITIES = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "ALL": 0}
+
+
+@dataclass
+class Cve:
+    article_id: int
+    cve_id: str
+    description: str
+    cvss_score: float | None
+    severity: str | None
+    cvss_version: str | None
+    products: list
+    kev: bool
+    kev_date: str | None
+    kev_ransomware: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class Technology:
+    id: int
+    key: str
+    name: str
+    grp: str
+    aliases: list
+    sort_order: int
+    is_active: bool
+    created_at: str
 
 
 def plain(row: dict) -> dict:
@@ -185,7 +223,9 @@ def plain(row: dict) -> dict:
     for k, v in row.items():
         if isinstance(v, datetime):
             v = iso(v)
-        elif k in ("keywords", "categories", "tags") and isinstance(v, str):
+        elif isinstance(v, date):
+            v = v.isoformat()
+        elif k in ("keywords", "categories", "tags", "products", "aliases") and isinstance(v, str):
             v = json.loads(v)
         out[k] = v
     return out
@@ -335,7 +375,8 @@ class Database:
         return _row(User, row) if row else None
 
     USER_FIELDS = {"language", "role", "status", "onboarding_completed", "notifications_enabled",
-                   "delivery_mode", "digest_hour", "last_digest_date", "max_per_day", "news_language"}
+                   "delivery_mode", "digest_hour", "last_digest_date", "max_per_day", "news_language",
+                   "cve_alerts", "cve_enabled_at", "cve_all_technologies", "cve_min_severity"}
 
     def update_user(self, telegram_id: int, **values) -> User:
         unknown = set(values) - self.USER_FIELDS
@@ -427,6 +468,111 @@ class Database:
             "UPDATE user_interests SET is_enabled = %s, updated_at = %s WHERE user_id = %s AND category_id = %s",
             (bool(enabled), _now(), user_id, category_id))
         return cur.rowcount > 0
+
+    # ---------- CVE reports ----------
+    def upsert_cve(self, article_id: int, data: dict) -> None:
+        """Store or merge a CVE's details. Merging keeps what's known: a severity found later, and the
+        CISA "actively exploited" flag once it's set."""
+        now = _now()
+        self.execute(
+            """INSERT INTO cves (article_id, cve_id, description, cvss_score, severity, cvss_version, products,
+                   kev, kev_date, kev_ransomware, created_at, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (article_id) DO UPDATE SET
+                   cvss_score = COALESCE(excluded.cvss_score, cves.cvss_score),
+                   severity = COALESCE(excluded.severity, cves.severity),
+                   cvss_version = COALESCE(excluded.cvss_version, cves.cvss_version),
+                   products = CASE WHEN jsonb_array_length(excluded.products) > 0 THEN excluded.products
+                                   ELSE cves.products END,
+                   kev = cves.kev OR excluded.kev,
+                   kev_date = COALESCE(cves.kev_date, excluded.kev_date),
+                   kev_ransomware = cves.kev_ransomware OR excluded.kev_ransomware,
+                   updated_at = excluded.updated_at""",
+            (article_id, data["cve_id"], data.get("description") or "", data.get("cvss_score"), data.get("severity"),
+             data.get("cvss_version"), json.dumps(data.get("products") or []), bool(data.get("kev")),
+             data.get("kev_date"), bool(data.get("kev_ransomware")), now, now))
+
+    def get_cve(self, article_id: int) -> Cve | None:
+        row = self.execute("SELECT * FROM cves WHERE article_id = %s", (article_id,)).fetchone()
+        return _row(Cve, row) if row else None
+
+    def cve_matching_users(self, article: Article, cve: Cve) -> list[tuple[int, None, str]]:
+        """(user_id, None, matched technology) for everyone who should get this CVE: CVE reports on, account
+        active, alerts not paused, severity at or above their minimum (or actively exploited), and one of
+        their technologies (added before the CVE was found) named in it — or they chose all technologies."""
+        from news import cve_term_matches  # avoid a circular import at load time
+        rank = SEVERITY_RANK.get(cve.severity, 0)
+        users = self.execute(
+            """SELECT telegram_id, cve_all_technologies, cve_min_severity, cve_enabled_at FROM users
+               WHERE cve_alerts AND status = 'active' AND notifications_enabled AND cve_enabled_at <= %s""",
+            (article.fetched_at,)).fetchall()
+        if not users:
+            return []
+        terms = self.execute(
+            """SELECT ut.user_id, ut.term, ut.created_at, t.name, t.aliases FROM user_technologies ut
+               LEFT JOIN technologies t ON t.id = ut.technology_id
+               WHERE ut.user_id = ANY(%s) AND ut.created_at <= %s AND (t.id IS NULL OR t.is_active)""",
+            ([u["telegram_id"] for u in users], article.fetched_at)).fetchall()
+        by_user: dict[int, list] = {}
+        for t in terms:
+            aliases = plain(t)["aliases"] if t["name"] else [t["term"]]
+            by_user.setdefault(t["user_id"], []).append((t["name"] or t["term"], aliases))
+        text = " ".join([article.title, cve.description, " ".join(cve.products)])
+        matches = []
+        for u in users:
+            if not cve.kev and rank < CVE_MIN_SEVERITIES.get(u["cve_min_severity"], 3):
+                continue
+            hit = next((name for name, aliases in by_user.get(u["telegram_id"], [])
+                        if cve_term_matches(text, aliases)), None)
+            if hit is None and u["cve_all_technologies"]:
+                hit = "*"
+            if hit is not None:
+                matches.append((u["telegram_id"], None, hit))
+        return matches
+
+    def seed_technologies(self, technologies: list[dict]) -> int:
+        """Add catalog technologies whose key isn't in the database yet. Returns how many were added."""
+        now, added = _now(), 0
+        for i, t in enumerate(technologies):
+            cur = self.execute(
+                """INSERT INTO technologies (key, name, grp, aliases, sort_order, created_at)
+                   VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (key) DO NOTHING""",
+                (t["key"], t["name"], t["group"], json.dumps(t.get("aliases") or [t["name"].lower()]), i, now))
+            added += cur.rowcount
+        return added
+
+    def technologies(self) -> list[Technology]:
+        rows = self.execute("SELECT * FROM technologies WHERE is_active ORDER BY sort_order, id").fetchall()
+        return [_row(Technology, r) for r in rows]
+
+    def user_technologies(self, user_id: int) -> list[dict]:
+        """The user's technologies: {term, technology_id, name} (name is the catalog name or the word)."""
+        rows = self.execute(
+            """SELECT ut.term, ut.technology_id, COALESCE(t.name, ut.term) AS name FROM user_technologies ut
+               LEFT JOIN technologies t ON t.id = ut.technology_id
+               WHERE ut.user_id = %s ORDER BY ut.technology_id NULLS LAST, ut.created_at""", (user_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_user_technology(self, user_id: int, term: str, technology_id: int | None = None) -> bool:
+        cur = self.execute(
+            "INSERT INTO user_technologies VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+            (user_id, term, technology_id, _now()))
+        return cur.rowcount > 0
+
+    def remove_user_technology(self, user_id: int, term: str) -> bool:
+        cur = self.execute("DELETE FROM user_technologies WHERE user_id = %s AND term = %s", (user_id, term))
+        return cur.rowcount > 0
+
+    def clear_user_technologies(self, user_id: int) -> None:
+        self.execute("DELETE FROM user_technologies WHERE user_id = %s", (user_id,))
+
+    def recent_cves(self, user: User, limit: int = 200) -> list[dict]:
+        """The user's CVE alerts (sent, pulled or waiting), newest first, for the CSV report."""
+        rows = self.execute(
+            """SELECT c.*, a.title, a.canonical_url, a.published_at, a.fetched_at, n.matched, n.status
+               FROM notifications n JOIN cves c ON c.article_id = n.article_id JOIN articles a ON a.id = n.article_id
+               WHERE n.user_id = %s ORDER BY a.id DESC LIMIT %s""", (user.telegram_id, limit)).fetchall()
+        return [plain(r) for r in rows]
 
     # ---------- the user's sources ----------
     def source_exclusions(self, user_id: int) -> set[int]:
@@ -530,9 +676,10 @@ class Database:
         where, args = [], []
         if provider_id:
             where.append("a.provider_id = %s"); args.append(provider_id)
-        if low_confidence:
+        if low_confidence:  # CVEs have no topics on purpose, so they're left out
             where.append("NOT EXISTS (SELECT 1 FROM article_categories ac WHERE ac.article_id = a.id"
-                         " AND ac.confidence >= %s)"); args.append(config.CLASSIFY_MIN_CONFIDENCE)
+                         " AND ac.confidence >= %s) AND NOT EXISTS (SELECT 1 FROM cves c WHERE c.article_id = a.id)")
+            args.append(config.CLASSIFY_MIN_CONFIDENCE)
         sql = ("SELECT a.*, p.name AS provider_name FROM articles a JOIN providers p ON p.id = a.provider_id"
                + (" WHERE " + " AND ".join(where) if where else "")
                + " ORDER BY a.id DESC LIMIT %s OFFSET %s")
@@ -603,8 +750,9 @@ class Database:
             best.setdefault(r["user_id"], r["category_id"])
         return list(best.items())
 
-    def queue_notifications(self, article: Article, matches: list[tuple[int, int]]) -> int:
-        """Queue one notification per (user, category). Users in digest mode get it held for their digest;
+    def queue_notifications(self, article: Article, matches: list[tuple]) -> int:
+        """Queue one notification per (user, category[, matched technology]). Users in digest mode get it
+        held for their digest;
         users over their daily limit get it marked skipped. Unique constraints make this safe to repeat
         (same article, or another article of the same story). Returns how many were newly queued."""
         if not matches:
@@ -612,7 +760,9 @@ class Database:
         now = _now()
         since = day_start_utc(local_today())
         queued = 0
-        for user_id, category_id in matches:
+        for match in matches:
+            user_id, category_id = match[0], match[1]
+            matched = match[2] if len(match) > 2 else None
             user = self.get_user(user_id)
             if not user:
                 continue
@@ -626,9 +776,9 @@ class Database:
                     status, error = "skipped", "daily limit reached"
             cur = self.execute(
                 """INSERT INTO notifications (user_id, article_id, cluster_id, category_id, status,
-                       next_attempt_at, last_error, created_at, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
-                (user_id, article.id, article.cluster_id, category_id, status, now, error, now, now))
+                       next_attempt_at, last_error, matched, created_at, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                (user_id, article.id, article.cluster_id, category_id, status, now, error, matched, now, now))
             queued += cur.rowcount if status != "skipped" else 0
         return queued
 
@@ -783,7 +933,8 @@ class Database:
                                     " AND story_cluster_id IS NOT NULL", (since,)),
             "low_confidence_today": one(
                 "SELECT COUNT(*) FROM articles a WHERE a.fetched_at >= %s AND NOT EXISTS (SELECT 1 FROM"
-                " article_categories ac WHERE ac.article_id = a.id AND ac.confidence >= %s)",
+                " article_categories ac WHERE ac.article_id = a.id AND ac.confidence >= %s)"
+                " AND NOT EXISTS (SELECT 1 FROM cves c WHERE c.article_id = a.id)",
                 (since, config.CLASSIFY_MIN_CONFIDENCE)),
             "queued": one("SELECT COUNT(*) FROM notifications WHERE status = 'queued'"),
             "queue_oldest": one("SELECT MIN(next_attempt_at) FROM notifications WHERE status = 'queued'"),
@@ -793,6 +944,9 @@ class Database:
                                 (since,)),
             "failed_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'failed' AND updated_at >= %s",
                                 (since,)),
+            "cves_today": one("SELECT COUNT(*) FROM cves c JOIN articles a ON a.id = c.article_id"
+                              " WHERE a.fetched_at >= %s", (since,)),
+            "cve_users": one("SELECT COUNT(*) FROM users WHERE cve_alerts"),
             "skipped_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'skipped' AND updated_at >= %s",
                                  (since,)),
         }
@@ -811,8 +965,9 @@ class Database:
                      " ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
 
     # ---------- backup ----------
-    BACKUP_TABLES = ("categories", "providers", "users", "user_interests", "user_source_exclusions", "articles",
-                     "article_categories", "notifications", "settings", "schema_migrations")
+    BACKUP_TABLES = ("categories", "providers", "users", "user_interests", "user_source_exclusions", "technologies",
+                     "user_technologies", "articles", "article_categories", "cves", "notifications", "settings",
+                     "schema_migrations")
 
     def export_table_csv(self, table: str) -> bytes:
         """One table as CSV with a header (restorable with COPY … FROM … CSV HEADER)."""
@@ -833,6 +988,15 @@ def load_seed() -> tuple[list[dict], list[dict]]:
     categories = json.loads((base / "categories.json").read_text(encoding="utf-8"))["categories"]
     providers = json.loads((base / "providers.json").read_text(encoding="utf-8"))["providers"]
     return categories, providers
+
+
+def load_technologies() -> tuple[dict, list[dict]]:
+    """(groups {key: {en, am}}, technologies) from seed/technologies.json."""
+    base = Path(config.SEED_DIR)
+    if not base.is_absolute():
+        base = Path(__file__).parent / base
+    data = json.loads((base / "technologies.json").read_text(encoding="utf-8"))
+    return data["groups"], data["technologies"]
 
 
 db = Database()

@@ -1,0 +1,8 @@
+{"title": "CISA Catalog of Known Exploited Vulnerabilities", "catalogVersion": "2026.11.27", "count": 2,
+ "vulnerabilities": [
+  {"cveID": "CVE-2026-50002", "vendorProject": "Microsoft", "product": "Windows", "vulnerabilityName": "Microsoft Windows Kernel Information Disclosure Vulnerability",
+   "dateAdded": "2026-11-27", "shortDescription": "Microsoft Windows Kernel contains an information disclosure vulnerability.", "requiredAction": "Apply mitigations.",
+   "dueDate": "2026-12-18", "knownRansomwareCampaignUse": "Known", "notes": "", "cwes": []},
+  {"cveID": "CVE-2019-0001", "vendorProject": "Old", "product": "Thing", "vulnerabilityName": "Old Thing Vulnerability",
+   "dateAdded": "2020-01-01", "shortDescription": "Old.", "requiredAction": "", "dueDate": "2020-02-01", "knownRansomwareCampaignUse": "Unknown", "notes": "", "cwes": []}
+ ]}

@@ -18,11 +18,13 @@ import config
 import metrics
 import texts
 from keyboards import grid
-from db import Article, Category, Notification, User, db, now_utc, to_local
+from db import Article, Category, Cve, Notification, User, db, now_utc, to_local
 
 log = logging.getLogger(__name__)
 
 MUTE_FROM_ALERT = "mua:"  # mua:<category_id>, handled in bot.py
+CVE_MENU = "cv:menu"      # opens the CVE reports screen, handled in bot.py
+SEVERITY_EMOJI = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢", "NONE": "⚪", None: "⚪"}
 CAPTION_LIMIT = 1024
 TEXT_LIMIT = 4096
 BATCH = 30
@@ -58,6 +60,33 @@ def format_alert(article: Article, provider_name: str, category: Category | None
     if category:
         buttons.append(InlineKeyboardButton(L.mute_button(category.name(language)),
                                             callback_data=f"{MUTE_FROM_ALERT}{category.id}"))
+    return text, InlineKeyboardMarkup(grid(buttons))
+
+
+def format_cve_alert(article: Article, cve: Cve, matched: str | None, language: str | None,
+                     limit: int) -> tuple[str, InlineKeyboardMarkup]:
+    """A CVE report: severity, "actively exploited" when CISA says so, the CVE id and description, which
+    of the user's technologies it matched, and a link to the NVD entry."""
+    L = texts.get(language)
+    severity = (f"{SEVERITY_EMOJI.get(cve.severity, '⚪')} <b>{L.SEVERITY_NAMES.get(cve.severity, L.SEVERITY_UNKNOWN)}"
+                + (f" {cve.cvss_score:g}" if cve.cvss_score is not None else "") + "</b>")
+    head = f"🛡 <b>{L.CVE_TITLE}</b> · {severity}"
+    if cve.kev:
+        head += f" · ⚠️ <b>{L.KEV_LABEL}</b>"
+    if cve.kev_ransomware:
+        head += f" · {L.RANSOMWARE_LABEL}"
+    when_label, when_value = (L.PUBLISHED, article.published_at) if article.published_at else (L.FOUND, article.fetched_at)
+    match_text = L.CVE_ALL_TECH if matched == "*" else html.escape(matched or "")
+    footer = ((f"\n\n🧩 {L.CVE_MATCHES}: {match_text}" if matched else "")
+              + f"\n🕒 {when_label}: {L.format_time(to_local(when_value))}")
+    description = cve.description
+    while True:
+        text = f"{head}\n<b>{html.escape(cve.cve_id)}</b>\n\n{html.escape(description)}{footer}"
+        if len(text) <= limit or len(description) <= 40:
+            break
+        description = _truncate(description, len(description) - (len(text) - limit) - 1)
+    buttons = [InlineKeyboardButton(L.CVE_DETAILS, url=article.canonical_url),
+               InlineKeyboardButton(L.CVE_SETTINGS_BUTTON, callback_data=CVE_MENU)]
     return text, InlineKeyboardMarkup(grid(buttons))
 
 
@@ -126,7 +155,12 @@ class Sender:
         if user and user.delivery_mode == "digest":
             db.mark_notification(n.id, "digest", count_attempt=False)
             return "digest"
-        category_id = self._eligible_category(n, user, article)
+        cve = db.get_cve(article.id) if article else None
+        if cve:  # CVE reports: same rules as when it was queued (CVE alerts on, severity, technologies)
+            still = {m[0] for m in db.cve_matching_users(article, cve)}
+            category_id = None if user and user.telegram_id in still else False
+        else:
+            category_id = self._eligible_category(n, user, article)
         if category_id is False:
             db.mark_notification(n.id, "skipped", "no longer eligible", count_attempt=False)
             metrics.inc("notifications_skipped")
@@ -134,7 +168,8 @@ class Sender:
         provider = db.get_provider(article.provider_id)
         category = db.get_category(category_id) if category_id else None
         try:
-            message_id = await self._send(user, article, provider.name if provider else "", category)
+            message_id = await send_alert(self.bot, user, article, provider.name if provider else "", category,
+                                          cve=cve, matched=n.matched)
         except RetryAfter as e:
             wait = _retry_after_seconds(e)
             self._paused_until = now_utc() + timedelta(seconds=wait)
@@ -172,13 +207,17 @@ class Sender:
         metrics.observe_delivery(article)
         return "sent"
 
-    async def _send(self, user: User, article: Article, provider_name: str, category: Category | None) -> int:
-        return await send_alert(self.bot, user, article, provider_name, category)
 
-
-async def send_alert(bot, user: User, article: Article, provider_name: str, category: Category | None) -> int:
-    """Send one alert: a photo with a caption when the feed gave an image Telegram can use, otherwise text.
-    Returns the Telegram message id. Used by the Sender and by the 📥 Latest news button."""
+async def send_alert(bot, user: User, article: Article, provider_name: str, category: Category | None,
+                     cve: Cve | None = None, matched: str | None = None) -> int:
+    """Send one alert: a photo with a caption when the feed gave an image Telegram can use, otherwise text;
+    a CVE report when `cve` is given. Returns the Telegram message id. Used by the Sender and by the
+    📥 Latest news button."""
+    if cve:
+        text, markup = format_cve_alert(article, cve, matched, user.language, TEXT_LIMIT)
+        message = await bot.send_message(user.chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup,
+                                         disable_web_page_preview=True)
+        return message.message_id
     if article.image_url:
         caption, markup = format_alert(article, provider_name, category, user.language, CAPTION_LIMIT)
         try:

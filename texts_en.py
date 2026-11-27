@@ -241,6 +241,7 @@ HELP = (f"❓ <b>How {BOT} works</b>\n{LINE}\n"
         "/digest — instant alerts or one daily digest\n"
         "/pause, /resume — stop or restart alerts\n"
         "/sources — choose your news sources\n"
+        "/cve — CVE reports: vulnerabilities in technologies you choose (nginx, Windows…)\n"
         "/language — change the bot language\n\n"
         "<i>The same story from several providers is sent once. Topics don't say anything about "
         "your views and are only used to choose your alerts.</i>")
@@ -261,7 +262,8 @@ def admin_status(s: dict, web_hint: bool) -> str:
             f"📰 Articles today: <b>{s['articles_today']}</b> · same story elsewhere {s['duplicates_today']}"
             f" · waiting for review {s['low_confidence_today']}\n"
             f"📬 Queue: <b>{s['queued']}</b> (oldest {oldest}) · held for digests {s['held_for_digest']}\n"
-            f"✅ Sent today: <b>{s['sent_today']}</b> · 📥 pulled {s.get('pulled_today', 0)} · ❌ failed {s['failed_today']} · skipped {s['skipped_today']}")
+            f"✅ Sent today: <b>{s['sent_today']}</b> · 📥 pulled {s.get('pulled_today', 0)} · ❌ failed {s['failed_today']} · skipped {s['skipped_today']}\n"
+            f"🛡 CVEs today: <b>{s.get('cves_today', 0)}</b> · users with CVE reports {s.get('cve_users', 0)}")
     if web_hint:
         text += "\n\n<i>More (article categories, keywords, users) on the web admin page.</i>"
     return text
@@ -337,3 +339,90 @@ def pull_done(sent: int, remaining: int) -> str:
 
 def pull_more(remaining: int) -> str:
     return f"📥 Show more ({remaining})"
+
+
+# ---------- 🛡 CVE reports ----------
+BTN_CVE = "🛡 CVE reports"
+CMD_CVE = "CVE reports for your technologies"
+SET_CVE = "🛡 CVE reports"
+CVE_TITLE = "CVE report"
+SEVERITY_NAMES = {"CRITICAL": "Critical", "HIGH": "High", "MEDIUM": "Medium", "LOW": "Low", "NONE": "None"}
+SEVERITY_UNKNOWN = "Not rated yet"
+KEV_LABEL = "Actively exploited"
+RANSOMWARE_LABEL = "💀 used by ransomware"
+CVE_MATCHES = "Matches"
+CVE_ALL_TECH = "all technologies"
+CVE_DETAILS = "📖 Details (NVD)"
+CVE_SETTINGS_BUTTON = "🛡 CVE settings"
+CVE_TURN_ON = "🔔 Turn on"
+CVE_TURN_OFF = "⏸ Turn off"
+CVE_PICK = "🧩 Popular technologies"
+CVE_ADD = "✍️ Add your own"
+CVE_ALL = "All technologies"
+CVE_SEVERITY = "⚠️ Minimum severity"
+CVE_CSV = "📄 CSV report"
+CVE_CANCEL = "✖️ Cancel"
+CVE_MIN_SEVERITY_LABELS = {"CRITICAL": "🔴 Critical only", "HIGH": "🟠 High and above",
+                           "MEDIUM": "🟡 Medium and above", "ALL": "⚪ All"}
+CVE_SEVERITY_PROMPT = ("⚠️ <b>Minimum severity</b>\nCVEs below this CVSS severity aren't sent. "
+                       "Ones CISA says are being exploited are always sent.")
+CVE_PICK_HINT = "<i>Tap to add or remove. ◀️ ▶️ for more groups.</i>"
+CVE_OWN_GROUP = "Your own"
+CVE_OWN_HINT = "<i>Tap one to remove it.</i>"
+CVE_OWN_EMPTY = "<i>None yet. Tap ✍️ Add your own to type names like nginx or Windows Server 2022.</i>"
+CVE_ADD_PROMPT = ("✍️ <b>Add your own technologies</b>\n"
+                  "Send their names, separated by commas or on separate lines, for example:\n"
+                  "<code>nginx, Windows Server 2022, FortiGate, Moodle</code>\n\n"
+                  "<i>A CVE matches when its description names one of them as a whole word.</i>")
+CVE_ADD_CANCELLED = "✖️ Cancelled"
+CVE_TECH_GONE = "That technology isn't on your list any more."
+CVE_ON_TOAST = "🔔 CVE reports on"
+CVE_OFF_TOAST = "⏸ CVE reports off"
+CVE_ALL_ON = "✅ All technologies"
+CVE_ALL_OFF = "⬜ Only your technologies"
+CVE_CSV_EMPTY = "No CVE reports yet. They'll appear here once one matches your technologies."
+
+
+def cve_screen(on: bool, severity: str, techs: list[str], all_tech: bool) -> str:
+    if all_tech:
+        tech_text = "<b>all technologies</b>"
+    elif techs:
+        shown = ", ".join(techs[:25]) + (f" and {len(techs) - 25} more" if len(techs) > 25 else "")
+        tech_text = f"<b>{len(techs)}</b>: {shown}"
+    else:
+        tech_text = "<b>none yet</b>: tap 🧩 or ✍️ below"
+    return (f"🛡 <b>CVE reports</b>\n"
+            "Alerts for newly published vulnerabilities (CVEs) in the technologies you use, from NIST's "
+            "National Vulnerability Database. ⚠️ marks CVEs CISA says are being exploited; those are always sent.\n"
+            f"{LINE}\n"
+            f"🔔 Alerts: <b>{'✅ On' if on else '⏸ Off'}</b>\n"
+            f"⚠️ Minimum severity: <b>{severity}</b>\n"
+            f"🧩 Technologies: {tech_text}")
+
+
+def cve_picker_title(group: str, page: int, pages: int, count: int) -> str:
+    return f"🧩 <b>{group}</b> · {page}/{pages}\n<i>On your list: {count}</i>"
+
+
+def tech_added(name: str) -> str:
+    return f"✅ {name} added"
+
+
+def tech_removed(name: str) -> str:
+    return f"⬜ {name} removed"
+
+
+def cve_added(added: list[str], existing: list[str], skipped: list[str]) -> str:
+    lines = []
+    if added:
+        lines.append("✅ <b>Added:</b> " + ", ".join(added))
+    if existing:
+        lines.append("ℹ️ Already on your list: " + ", ".join(existing))
+    if skipped:
+        lines.append("⚠️ Not added (2-50 letters, digits, spaces or . + # / -; at most 50 of your own): "
+                     + ", ".join(skipped))
+    return "\n".join(lines) or "Nothing to add."
+
+
+def cve_csv_caption(count: int) -> str:
+    return f"📄 <b>CVE report</b>: your last {count} CVE {'alert' if count == 1 else 'alerts'}"

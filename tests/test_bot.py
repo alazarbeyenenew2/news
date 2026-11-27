@@ -423,7 +423,8 @@ def test_sources_can_be_switched_off(chat):
     chat.send("/sources")
     groups = {}
     for p in db.providers(enabled_only=True):
-        groups.setdefault(p.name, set()).add(p.id)
+        if p.adapter_key not in ("nvd", "kev"):  # CVE providers are managed on the CVE screen
+            groups.setdefault(p.name, set()).add(p.id)
     refused = None
     for name, ids in sorted(groups.items()):
         if ids <= db.source_exclusions(USER):

@@ -7,7 +7,6 @@ API, say) can be added without touching the processing below. Only RSS/Atom is b
 import asyncio
 import logging
 import random
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable, Protocol
 
@@ -17,24 +16,13 @@ import config
 import metrics
 from db import Provider, db, now_utc, parse_iso
 from netsafe import TooLarge, UnsafeURL, safe_get
-from news import Classifier, CategoryRule, RawArticle, RuleClassifier, find_similar, normalize, parse_feed
+from news import (Classifier, CategoryRule, FetchError, FetchResult, RawArticle, RuleClassifier, find_similar,
+                  normalize, parse_feed)
 
 log = logging.getLogger(__name__)
 
 LOOP_SECONDS = 15  # how often due providers are looked for (each has its own polling interval)
 MAX_BACKOFF = timedelta(hours=6)
-
-
-class FetchError(Exception):
-    pass
-
-
-@dataclass
-class FetchResult:
-    items: list[RawArticle] = field(default_factory=list)
-    etag: str | None = None
-    last_modified: str | None = None
-    not_modified: bool = False
 
 
 class NewsProvider(Protocol):
@@ -65,7 +53,12 @@ class RssAdapter:
                            last_modified=response.headers.get("last-modified"))
 
 
-ADAPTERS: dict[str, NewsProvider] = {"rss": RssAdapter(), "atom": RssAdapter()}
+def _default_adapters() -> dict[str, NewsProvider]:
+    from cves import KevAdapter, NvdAdapter  # cves imports db/netsafe/news only; imported here to keep load order simple
+    return {"rss": RssAdapter(), "atom": RssAdapter(), "nvd": NvdAdapter(), "kev": KevAdapter()}
+
+
+ADAPTERS: dict[str, NewsProvider] = _default_adapters()
 
 
 class Collector:
@@ -190,6 +183,9 @@ class Collector:
 
     def _store(self, provider: Provider, article: dict, rules: list[CategoryRule],
                recent: list[tuple[int, str, str, int]]) -> tuple[str, int]:
+        cve = (article.pop("extra", None) or {}).get("cve")
+        if cve:
+            return self._store_cve(provider, article, cve)
         # 1. Same item from the same feed: the usual case on every poll.
         if article["external_id"] and db.article_by_external_id(provider.id, article["external_id"]):
             return "duplicate", 0
@@ -221,13 +217,39 @@ class Collector:
             return "new", 0
         return "new", self.match(article_id)
 
+    def _store_cve(self, provider: Provider, article: dict, cve: dict) -> tuple[str, int]:
+        """A CVE (from NVD or CISA KEV). It isn't put into topics, so it never floods Cybersecurity
+        followers; it reaches only people whose CVE reports match it. The same CVE from both sources is
+        one article (same NVD link): the second just adds what it knows, e.g. "actively exploited",
+        and people that newly qualifies for are alerted."""
+        existing = (db.article_by_external_id(provider.id, article["external_id"])
+                    if article["external_id"] else None) or db.article_by_url(article["canonical_url"])
+        if existing:
+            if existing.provider_id == provider.id and existing.external_id == article["external_id"]:
+                return "duplicate", 0
+            db.upsert_cve(existing.id, cve)
+            if existing.is_backlog or article["is_backlog"]:
+                return "duplicate", 0
+            return "duplicate", self.match(existing.id)
+        article["story_cluster_id"] = None
+        article_id = db.insert_article(provider.id, article)
+        if article_id is None:
+            return "duplicate", 0
+        db.upsert_cve(article_id, cve)
+        metrics.inc("cves_stored")
+        if article["is_backlog"]:
+            return "new", 0
+        return "new", self.match(article_id)
+
     def match(self, article_id: int) -> int:
-        """Queue alerts for everyone who should get this article. Safe to call again (e.g. after an admin
-        corrects its categories): nobody gets the same story twice."""
+        """Queue alerts for everyone who should get this article (or CVE). Safe to call again (e.g. after
+        an admin corrects its categories): nobody gets the same story twice."""
         article = db.get_article(article_id)
         if not article or article.is_backlog:
             return 0
-        queued = db.queue_notifications(article, db.matching_users(article))
+        cve = db.get_cve(article.id)
+        matches = db.cve_matching_users(article, cve) if cve else db.matching_users(article)
+        queued = db.queue_notifications(article, matches)
         metrics.inc("notifications_queued", queued)
         return queued
 

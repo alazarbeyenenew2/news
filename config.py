@@ -63,6 +63,9 @@ DEDUP_TITLE_SIMILARITY = float(os.getenv("DEDUP_TITLE_SIMILARITY", "0.88"))
 # How long articles are kept (notifications for them are deleted too). 0 = forever.
 ARTICLE_RETENTION_DAYS = int(os.getenv("ARTICLE_RETENTION_DAYS", "30"))
 
+# Optional NIST NVD API key for CVE reports (higher rate limit): https://nvd.nist.gov/developers/request-an-api-key
+NVD_API_KEY = os.getenv("NVD_API_KEY", "")
+
 # ---------- delivery ----------
 # Telegram allows about 30 messages per second overall; stay under it.
 MESSAGES_PER_SECOND = float(os.getenv("MESSAGES_PER_SECOND", "20"))

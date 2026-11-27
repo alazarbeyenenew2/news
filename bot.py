@@ -4,8 +4,12 @@ Alerts themselves are sent by delivery.py; news is collected by collector.py. Ev
 Telegram lives in texts_am.py / texts_en.py; each person sees their own language.
 """
 import asyncio
+import csv
+import hashlib
 import html
+import io
 import logging
+import re
 from datetime import datetime
 
 from telegram import (
@@ -35,8 +39,9 @@ import backup
 import config
 import texts
 import metrics
-from db import User, day_start_utc, db, local_today, now_utc, parse_iso, to_local
-from delivery import MUTE_FROM_ALERT, send_alert
+from db import (CVE_MIN_SEVERITIES, User, day_start_utc, db, load_technologies, local_today, now_utc, parse_iso,
+                to_local)
+from delivery import CVE_MENU, MUTE_FROM_ALERT, send_alert
 from keyboards import grid
 
 log = logging.getLogger(__name__)
@@ -62,6 +67,11 @@ PULL_MORE = "pull:more"  # the "more" button under a 📥 Latest news batch
 NOOP = "noop"
 PULL_PAGE = 5  # stories per 📥 Latest news tap
 PULL_REFRESH_SECONDS = 12  # how long 📥 Latest news waits for the feeds it re-checks
+CVE = "cv:"  # cv:menu|on|off|all|sev[:<level>]|p:<page>|t:<page>:<tech id>|r:<page>:<hash>|add|addx|csv|close
+CVE_ADAPTERS = ("nvd", "kev")  # CVE providers: managed on the CVE screen, not in 📚 Sources
+MAX_OWN_TECHNOLOGIES = 50
+TERM_CHARS = re.compile(r"[\w .+#/\-]+")
+TECH_GROUPS = load_technologies()[0]  # group key -> {"en": name, "am": name}, in display order
 
 DIGEST_HOURS = (6, 7, 8, 9, 12, 13, 18, 20, 21)
 DAILY_LIMITS = (10, 20, 30, 50, 100, 0)
@@ -90,7 +100,7 @@ def _commands(user: User) -> list[BotCommand]:
                 BotCommand("settings", L.CMD_SETTINGS), BotCommand("digest", L.CMD_DIGEST),
                 BotCommand("pause", L.CMD_PAUSE), BotCommand("resume", L.CMD_RESUME),
                 BotCommand("sources", L.CMD_SOURCES), BotCommand("language", L.CMD_LANGUAGE),
-                BotCommand("help", L.CMD_HELP)]
+                BotCommand("cve", L.CMD_CVE), BotCommand("help", L.CMD_HELP)]
     if user.is_admin:
         commands.append(BotCommand("admin", L.CMD_ADMIN))
     if user.is_super_admin:
@@ -104,8 +114,8 @@ def main_keyboard(user: User) -> ReplyKeyboardMarkup:
             [KeyboardButton(L.BTN_TOPICS), KeyboardButton(L.BTN_SETTINGS)],
             [KeyboardButton(L.BTN_PAUSE if user.notifications_enabled else L.BTN_RESUME),
              KeyboardButton(L.BTN_DIGEST)],
-            [KeyboardButton(L.BTN_SOURCES), KeyboardButton(L.BTN_HELP)]]
-    last = [KeyboardButton(texts.LANGUAGE_BUTTON)]
+            [KeyboardButton(L.BTN_SOURCES), KeyboardButton(L.BTN_CVE)]]
+    last = [KeyboardButton(texts.LANGUAGE_BUTTON), KeyboardButton(L.BTN_HELP)]
     if user.is_admin:
         last.append(KeyboardButton(L.BTN_ADMIN))
     rows.append(last)
@@ -342,6 +352,8 @@ def _source_groups(user: User, mode: str) -> list[dict]:
     categories = {c.key: c for c in db.categories()}
     groups: dict[str, dict] = {}
     for p in db.providers(enabled_only=True):
+        if p.adapter_key in CVE_ADAPTERS:
+            continue
         g = groups.setdefault(p.name, {"name": p.name, "ids": set(), "topics": []})
         g["ids"].add(p.id)
         for key in p.categories:
@@ -529,6 +541,7 @@ def _settings_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
         (L.SET_NEWS_LANGUAGE, f"{SETTINGS}nl"),
         (L.SET_TOPICS, f"{SETTINGS}topics"),
         (L.SET_SOURCES, f"{SETTINGS}sources"),
+        (L.SET_CVE, CVE_MENU),
         (L.SET_MUTE, f"{SETTINGS}mute"),
         (L.CLOSE, f"{SETTINGS}close"),
     ])
@@ -772,6 +785,248 @@ async def _refresh_sources(context: ContextTypes.DEFAULT_TYPE, user: User, chat_
         log.info("Latest news for %s: some feeds still loading after %ss", user.telegram_id, PULL_REFRESH_SECONDS)
     except Exception:
         log.exception("Refreshing sources for %s failed", user.telegram_id)
+
+
+# ---------- 🛡 CVE reports ----------
+def _term_hash(term: str) -> str:
+    return hashlib.sha1(term.encode("utf-8")).hexdigest()[:8]
+
+
+def _cve_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
+    L = tr(user)
+    techs = [t["name"] for t in db.user_technologies(user.telegram_id)]
+    text = L.cve_screen(user.cve_alerts, L.CVE_MIN_SEVERITY_LABELS[user.cve_min_severity], techs,
+                        user.cve_all_technologies)
+    rows = _grid([
+        (L.CVE_TURN_OFF if user.cve_alerts else L.CVE_TURN_ON, f"{CVE}{'off' if user.cve_alerts else 'on'}"),
+        (L.CVE_PICK, f"{CVE}p:0"),
+        (L.CVE_ADD, f"{CVE}add"),
+        (("✅ " if user.cve_all_technologies else "⬜ ") + L.CVE_ALL, f"{CVE}all"),
+        (L.CVE_SEVERITY, f"{CVE}sev"),
+        (L.CVE_CSV, f"{CVE}csv"),
+        (L.CLOSE, f"{CVE}close"),
+    ])
+    return text, InlineKeyboardMarkup(rows)
+
+
+def _cve_pages() -> list[str]:
+    """Group keys that have technologies, in the seed file's order, then "own" (the user's own words)."""
+    present = {t.grp for t in db.technologies()}
+    return [g for g in TECH_GROUPS if g in present] + ["own"]
+
+
+def _cve_picker(user: User, page: int) -> tuple[str, InlineKeyboardMarkup]:
+    L = tr(user)
+    pages = _cve_pages()
+    page = min(max(page, 0), len(pages) - 1)
+    mine = db.user_technologies(user.telegram_id)
+    chosen = {t["technology_id"] for t in mine if t["technology_id"]}
+    group = pages[page]
+    if group == "own":
+        own = [t for t in mine if not t["technology_id"]]
+        rows = _grid([("✅ " + t["name"], f"{CVE}r:{page}:{_term_hash(t['term'])}") for t in own], checkboxes=True)
+        rows.append([_button(L.CVE_ADD, f"{CVE}add")])
+        title = L.CVE_OWN_GROUP
+        body = L.CVE_OWN_HINT if own else L.CVE_OWN_EMPTY
+    else:
+        techs = [t for t in db.technologies() if t.grp == group]
+        rows = _grid([(("✅ " if t.id in chosen else "⬜ ") + t.name, f"{CVE}t:{page}:{t.id}") for t in techs],
+                     checkboxes=True)
+        title = TECH_GROUPS[group].get(user.language or "en") or TECH_GROUPS[group]["en"]
+        body = L.CVE_PICK_HINT
+    rows.append([_button("◀️", f"{CVE}p:{page - 1}") if page > 0 else _button(" ", NOOP),
+                 _button(f"{page + 1}/{len(pages)}", NOOP),
+                 _button("▶️", f"{CVE}p:{page + 1}") if page < len(pages) - 1 else _button(" ", NOOP)])
+    rows.append([_button(L.DONE, CVE_MENU)])
+    return L.cve_picker_title(title, page + 1, len(pages), len(mine)) + "\n" + body, InlineKeyboardMarkup(rows)
+
+
+def _cve_turn_on(user: User) -> User:
+    if user.cve_alerts:
+        return user
+    log.info("User %s turned CVE reports on", user.telegram_id)
+    return db.update_user(user.telegram_id, cve_alerts=True, cve_enabled_at=now_utc().isoformat())
+
+
+async def cve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """🛡 CVE reports or /cve."""
+    user = await _active_user(update, context)
+    if user:
+        context.user_data.pop("cve_adding", None)
+        await _send(context, update.effective_chat.id, *_cve_screen(user))
+
+
+async def cve_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """cv:… buttons. Every change is saved at once and answered with a pop-up."""
+    query = update.callback_query
+    user = await _active_user(update, context)
+    if not user:
+        return
+    L = tr(user)
+    parts = query.data[len(CVE):].split(":")
+    action = parts[0]
+    toast, alert = None, False
+    if action == "close":
+        await query.answer()
+        try:
+            await query.message.delete()
+        except TelegramError:
+            await _show(update, context, L.CVE_TITLE, None)
+        return
+    if action == "csv":
+        await _send_cve_csv(update, context, user)
+        return
+    if action == "add":
+        context.user_data["cve_adding"] = True
+        await query.answer()
+        await _show(update, context, L.CVE_ADD_PROMPT, InlineKeyboardMarkup([[_button(L.CVE_CANCEL, f"{CVE}addx")]]))
+        return
+    if action == "addx":
+        context.user_data.pop("cve_adding", None)
+        toast = L.CVE_ADD_CANCELLED
+    elif action in ("on", "off"):
+        if action == "on":
+            user = _cve_turn_on(user)
+            toast = L.CVE_ON_TOAST
+        else:
+            user = db.update_user(user.telegram_id, cve_alerts=False)
+            db.execute("UPDATE notifications n SET status = 'skipped', last_error = 'CVE reports turned off'"
+                       " FROM cves c WHERE c.article_id = n.article_id AND n.user_id = %s"
+                       " AND n.status IN ('queued', 'digest')", (user.telegram_id,))
+            toast = L.CVE_OFF_TOAST
+    elif action == "all":
+        user = db.update_user(user.telegram_id, cve_all_technologies=not user.cve_all_technologies)
+        if user.cve_all_technologies:
+            user = _cve_turn_on(user)
+        toast = L.CVE_ALL_ON if user.cve_all_technologies else L.CVE_ALL_OFF
+    elif action == "sev":
+        if len(parts) > 1 and parts[1] in CVE_MIN_SEVERITIES:
+            user = db.update_user(user.telegram_id, cve_min_severity=parts[1])
+            toast = L.CVE_MIN_SEVERITY_LABELS[parts[1]]
+        else:
+            await query.answer()
+            rows = _grid([(("✅ " if level == user.cve_min_severity else "⬜ ") + label, f"{CVE}sev:{level}")
+                          for level, label in L.CVE_MIN_SEVERITY_LABELS.items()], checkboxes=True)
+            rows.append([_button(L.BACK, CVE_MENU)])
+            await _show(update, context, L.CVE_SEVERITY_PROMPT, InlineKeyboardMarkup(rows))
+            return
+        await query.answer(toast)
+        rows = _grid([(("✅ " if level == user.cve_min_severity else "⬜ ") + label, f"{CVE}sev:{level}")
+                      for level, label in L.CVE_MIN_SEVERITY_LABELS.items()], checkboxes=True)
+        rows.append([_button(L.BACK, CVE_MENU)])
+        await _show(update, context, L.CVE_SEVERITY_PROMPT, InlineKeyboardMarkup(rows))
+        return
+    elif action in ("p", "t", "r"):
+        page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        if action == "t" and len(parts) > 2 and parts[2].isdigit():
+            tech = next((t for t in db.technologies() if t.id == int(parts[2])), None)
+            if not tech:
+                toast, alert = L.CVE_TECH_GONE, True
+            elif db.remove_user_technology(user.telegram_id, f"tech:{tech.key}"):
+                toast = L.tech_removed(tech.name)
+            else:
+                db.add_user_technology(user.telegram_id, f"tech:{tech.key}", tech.id)
+                user = _cve_turn_on(user)
+                toast = L.tech_added(tech.name)
+        elif action == "r" and len(parts) > 2:
+            own = {_term_hash(t["term"]): t for t in db.user_technologies(user.telegram_id) if not t["technology_id"]}
+            term = own.get(parts[2])
+            if term and db.remove_user_technology(user.telegram_id, term["term"]):
+                toast = L.tech_removed(term["name"])
+            else:
+                toast, alert = L.CVE_TECH_GONE, True
+        await query.answer(toast, show_alert=alert)
+        await _show(update, context, *_cve_picker(user, page))
+        return
+    await query.answer(toast, show_alert=alert)
+    await _show(update, context, *_cve_screen(user))
+
+
+def _parse_terms(text: str) -> tuple[list[str], list[str]]:
+    """Technology names typed by a user (separated by commas, semicolons or new lines): (good, rejected).
+    A name is 2-50 letters, digits, spaces or . + # / - characters."""
+    good, bad = [], []
+    for raw in re.split(r"[,;\n]+", text):
+        term = " ".join(raw.split())
+        if not term:
+            continue
+        if 2 <= len(term) <= 50 and TERM_CHARS.fullmatch(term) and any(ch.isalnum() for ch in term):
+            if term.casefold() not in [g.casefold() for g in good]:
+                good.append(term)
+        else:
+            bad.append(term[:50])
+    return good, bad
+
+
+async def cve_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
+    """The message after ✍️ Add your own: add each name. A name that's in the catalog (or one of its
+    aliases) ticks the catalog entry; anything else is matched as typed."""
+    L = tr(user)
+    context.user_data.pop("cve_adding", None)
+    good, bad = _parse_terms(update.message.text or "")
+    catalog = {}
+    for t in db.technologies():
+        for name in [t.name, *t.aliases]:
+            catalog.setdefault(name.casefold(), t)
+    mine = db.user_technologies(user.telegram_id)
+    own_count = sum(1 for t in mine if not t["technology_id"])
+    added, existing = [], []
+    for term in good:
+        tech = catalog.get(term.casefold())
+        if tech:
+            ok = db.add_user_technology(user.telegram_id, f"tech:{tech.key}", tech.id)
+            name = tech.name
+        elif own_count >= MAX_OWN_TECHNOLOGIES:
+            bad.append(term)
+            continue
+        else:
+            ok = db.add_user_technology(user.telegram_id, term.casefold())
+            own_count += ok
+            name = term.casefold()
+        (added if ok else existing).append(name)
+    if added:
+        user = _cve_turn_on(user)
+    log.info("User %s added %s technologies for CVE reports", user.telegram_id, len(added))
+    await _send(context, update.effective_chat.id,
+                L.cve_added([html.escape(n) for n in added], [html.escape(n) for n in existing],
+                            [html.escape(n) for n in bad]), main_keyboard(user))
+    await _send(context, update.effective_chat.id, *_cve_screen(user))
+
+
+async def _send_cve_csv(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
+    """📄 CSV report: the user's CVE alerts as a spreadsheet."""
+    L = tr(user)
+    rows = db.recent_cves(user, 1000)
+    if not rows:
+        await update.callback_query.answer(L.CVE_CSV_EMPTY, show_alert=True)
+        return
+    await update.callback_query.answer()
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["cve_id", "published", "severity", "cvss_score", "actively_exploited", "ransomware",
+                     "matched", "description", "nvd_link"])
+    for r in rows:
+        when = r["published_at"] or r["fetched_at"]
+        writer.writerow([r["cve_id"], to_local(when).strftime("%Y-%m-%d %H:%M") if when else "",
+                         r["severity"] or "", "" if r["cvss_score"] is None else r["cvss_score"],
+                         "yes" if r["kev"] else "no", "yes" if r["kev_ransomware"] else "no",
+                         "all technologies" if r["matched"] == "*" else (r["matched"] or ""),
+                         r["description"], r["canonical_url"]])
+    data = ("\ufeff" + out.getvalue()).encode("utf-8")  # BOM: Excel opens it as UTF-8
+    name = f"cve-report_{local_today().isoformat()}.csv"
+    await context.bot.send_document(update.effective_chat.id, document=data, filename=name,
+                                    caption=L.cve_csv_caption(len(rows)), parse_mode=ParseMode.HTML)
+    log.info("User %s downloaded a CVE report (%s rows)", user.telegram_id, len(rows))
+
+
+async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Free text: technology names after ✍️ Add your own, otherwise the "I only understand…" reply."""
+    if context.user_data.get("cve_adding"):
+        user = await _active_user(update, context)
+        if user:
+            await cve_add_text(update, context, user)
+        return
+    await unknown(update, context)
 
 
 # ---------- sources / help ----------
@@ -1058,13 +1313,14 @@ def build_application(request=None) -> Application:
     for command, handler in [("start", start), ("latest", pull_news), ("interests", interests), ("topics", interests),
                              ("settings", settings), ("digest", digest), ("pause", pause), ("resume", resume),
                              ("sources", sources), ("language", choose_language), ("help", help_command),
-                             ("admin", admin), ("backup", backup_menu)]:
+                             ("admin", admin), ("backup", backup_menu), ("cve", cve)]:
         app.add_handler(CommandHandler(command, handler, filters=private))
 
     # Reply keyboard buttons, in every language.
     for name, handler in [("BTN_TOPICS", interests), ("BTN_SETTINGS", settings), ("BTN_PAUSE", pause),
                           ("BTN_RESUME", resume), ("BTN_DIGEST", digest), ("BTN_SOURCES", sources),
-                          ("BTN_HELP", help_command), ("BTN_ADMIN", admin), ("BTN_PULL", pull_news)]:
+                          ("BTN_HELP", help_command), ("BTN_ADMIN", admin), ("BTN_PULL", pull_news),
+                          ("BTN_CVE", cve)]:
         app.add_handler(MessageHandler(private & filters.Text(texts.labels(name)), handler))
     app.add_handler(MessageHandler(private & filters.Text([texts.LANGUAGE_BUTTON]), choose_language))
 
@@ -1081,8 +1337,11 @@ def build_application(request=None) -> Application:
     app.add_handler(CallbackQueryHandler(admin_action, pattern=rf"^{ADMIN}[a-z]+(:\d+){{0,2}}$"))
     app.add_handler(CallbackQueryHandler(backup_action, pattern=rf"^{BACKUP}(now|on|off)$"))
     app.add_handler(CallbackQueryHandler(pull_news, pattern=f"^{PULL_MORE}$"))
+    app.add_handler(CallbackQueryHandler(
+        cve_action, pattern=rf"^{CVE}(menu|on|off|all|sev|sev:[A-Z]+|p:\d+|t:\d+:\d+|r:\d+:[0-9a-f]{{8}}|add|addx|csv|close)$"))
     app.add_handler(CallbackQueryHandler(noop, pattern=f"^{NOOP}$"))
     app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, text_message))
     app.add_handler(MessageHandler(private & ~filters.COMMAND, unknown))
     app.add_handler(MessageHandler(private & filters.COMMAND, unknown))
     app.add_error_handler(on_error)
