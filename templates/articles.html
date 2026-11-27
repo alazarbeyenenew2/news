@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block heading %}Articles{% endblock %}
+{% block subheading %}<p>Newest first, with the topics they were given and why.</p>{% endblock %}
 {% block content %}
 <div class="card">
   <form method="get" action="/articles" class="actions">
@@ -7,12 +10,12 @@
       {% for p in providers %}<option value="{{ p.id }}" {{ 'selected' if p.id == provider }}>{{ p.name }} · {{ p.key }}</option>{% endfor %}
     </select>
     <label class="small"><input type="checkbox" name="low" value="1" {{ 'checked' if low }}> Only articles with no confident topic</label>
-    <button type="submit">Show</button>
+    <button class="primary" type="submit">{{ icon("search", 16) }} Show</button>
   </form>
 </div>
 <div class="card">
-  <h2>📰 Articles</h2>
-  <p class="small muted">Correcting topics sets them by hand (confidence 1.0). If the article is recent, people following a newly added topic get it; nobody gets the same story twice.</p>
+  <h2>{{ icon("news") }} Articles</h2>
+  <p class="small muted" style="margin-top:-6px">Correcting topics sets them by hand (confidence 1.0). If the article is recent, people following a newly added topic get it; nobody gets the same story twice.</p>
   <div class="table-wrap">
   <table>
     <thead><tr><th>Article</th><th>Topics (confidence · why)</th><th>Correct topics</th></tr></thead>

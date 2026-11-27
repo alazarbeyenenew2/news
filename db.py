@@ -9,7 +9,7 @@ import logging
 import time as _time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 import psycopg
@@ -958,6 +958,43 @@ class Database:
             "skipped_today": one("SELECT COUNT(*) FROM notifications WHERE status = 'skipped' AND updated_at >= %s",
                                  (since,)),
         }
+
+    def dashboard(self, days: int = 14) -> dict:
+        """Numbers for the admin overview's charts, by local day (TIMEZONE)."""
+        tz = config.TIMEZONE.key
+        start_day = local_today() - timedelta(days=days - 1)
+        since = day_start_utc(start_day)
+        rows = self.execute(
+            """
+            WITH d AS (SELECT generate_series(%(start)s::date, %(today)s::date, interval '1 day')::date AS day),
+            a AS (SELECT (a.fetched_at AT TIME ZONE %(tz)s)::date AS day,
+                         COUNT(*) FILTER (WHERE c.article_id IS NULL) AS articles,
+                         COUNT(*) FILTER (WHERE c.article_id IS NOT NULL) AS cves
+                  FROM articles a LEFT JOIN cves c ON c.article_id = a.id
+                  WHERE a.fetched_at >= %(since)s GROUP BY 1),
+            n AS (SELECT (sent_at AT TIME ZONE %(tz)s)::date AS day, COUNT(*) AS sent
+                  FROM notifications WHERE status IN ('sent', 'pulled') AND sent_at >= %(since)s GROUP BY 1)
+            SELECT d.day, COALESCE(a.articles, 0) AS articles, COALESCE(a.cves, 0) AS cves,
+                   COALESCE(n.sent, 0) AS sent
+            FROM d LEFT JOIN a USING (day) LEFT JOIN n USING (day) ORDER BY d.day
+            """, {"start": start_day.isoformat(), "today": local_today().isoformat(), "since": since, "tz": tz}).fetchall()
+        activity = [{"day": r["day"].isoformat(), "label": r["day"].strftime("%d %b"), "weekday": r["day"].strftime("%a"),
+                     "articles": r["articles"], "cves": r["cves"], "sent": r["sent"]} for r in rows]
+        today = day_start_utc(local_today())
+        topics = [dict(r) for r in self.execute(
+            """SELECT c.emoji, c.name_en AS name, COUNT(DISTINCT ac.article_id) AS n
+               FROM categories c LEFT JOIN article_categories ac ON ac.category_id = c.id AND ac.confidence >= %s
+                    AND ac.article_id IN (SELECT id FROM articles WHERE fetched_at >= %s)
+               WHERE c.is_active GROUP BY c.id ORDER BY n DESC, c.sort_order""",
+            (config.CLASSIFY_MIN_CONFIDENCE, today)).fetchall()]
+        severity = {r["severity"] or "NONE": r["n"] for r in self.execute(
+            """SELECT c.severity, COUNT(*) AS n FROM cves c JOIN articles a ON a.id = c.article_id
+               WHERE a.fetched_at >= %s GROUP BY c.severity""", (today,)).fetchall()}
+        kev_today = self._one("SELECT COUNT(*) FROM cves c JOIN articles a ON a.id = c.article_id"
+                              " WHERE a.fetched_at >= %s AND c.kev", (today,))
+        followers = self._one("SELECT COUNT(DISTINCT user_id) FROM user_interests WHERE is_enabled")
+        return {"activity": activity, "topics": topics, "severity": severity, "kev_today": kev_today,
+                "followers": followers}
 
     # ---------- retention ----------
     def delete_old_articles(self, older_than: datetime) -> int:

@@ -1,8 +1,11 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block heading %}Topics{% endblock %}
+{% block subheading %}<p>What articles are about, and the keywords that decide it.</p>{% endblock %}
 {% block content %}
 <div class="card">
-  <h2>🗂 Topics</h2>
-  <p class="small muted">An article gets a topic when its confidence is at least <b>{{ threshold }}</b>. Evidence is combined: provider default, keywords in the headline (full weight), in the summary (60%) and in provider tags (80%). Keyword changes apply to new articles.</p>
+  <h2>{{ icon("tag") }} All topics</h2>
+  <p class="small muted" style="margin-top:-6px">An article gets a topic when its confidence is at least <b>{{ threshold }}</b>. Evidence is combined: provider default, keywords in the headline (full weight), in the summary (60%) and in provider tags (80%). Keyword changes apply to new articles.</p>
   <div class="table-wrap">
   <table>
     <thead><tr><th>Topic</th><th>State</th><th>Followers</th><th>Keywords {"phrase": weight}</th><th></th></tr></thead>
@@ -30,7 +33,7 @@
   </div>
 </div>
 <div class="card">
-  <h2>➕ Add a topic</h2>
+  <h2>{{ icon("plus") }} Add a topic</h2>
   <form method="post" action="/categories" class="grid-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input name="key" placeholder="key, e.g. climate" required pattern="[a-z0-9_]{2,40}">
@@ -38,7 +41,7 @@
     <input name="name_en" placeholder="English name" required>
     <input name="name_am" placeholder="Amharic name">
     <input name="keywords" placeholder='{"climate": 0.7}' value="{}">
-    <button class="primary" type="submit">Add</button>
+    <button class="primary" type="submit">{{ icon("plus", 16) }} Add topic</button>
   </form>
 </div>
 {% endblock %}

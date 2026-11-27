@@ -19,6 +19,26 @@ from netsafe import UnsafeURL, check_url_syntax
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["local"] = lambda iso: to_local(iso).strftime("%Y-%m-%d %H:%M") if iso else "—"
 templates.env.filters["tojson_pretty"] = lambda v: json.dumps(v, ensure_ascii=False, indent=1)
+
+
+def _ago(iso: str | None) -> str:
+    """'just now', '5 min ago', '3 h ago', '2 days ago' (or in the future: 'in 5 min')."""
+    if not iso:
+        return "never"
+    seconds = int((now_utc() - parse_iso(iso)).total_seconds())
+    future, seconds = seconds < 0, abs(seconds)
+    if seconds < 60:
+        text = "just now" if not future else "in under a minute"
+        return text
+    for unit, size in (("day", 86400), ("h", 3600), ("min", 60)):
+        if seconds >= size:
+            n = seconds // size
+            label = f"{n} {unit}" + ("s" if unit == "day" and n != 1 else "")
+            return f"in {label}" if future else f"{label} ago"
+    return "just now"
+
+
+templates.env.filters["ago"] = _ago
 KEY = re.compile(r"^[a-z0-9_]{2,40}$")
 
 
@@ -36,8 +56,9 @@ def create_web_app(lifespan=None) -> FastAPI:
             raise HTTPException(400, "Invalid form token, reload the page and try again.")
 
     def page(request: Request, name: str, **context):
+        failed = db._one("SELECT COUNT(*) FROM notifications WHERE status = 'failed'")
         return templates.TemplateResponse(request, name, {"csrf": request.session.get("csrf", ""),
-                                                          "bot_name": config.BOT_NAME,
+                                                          "bot_name": config.BOT_NAME, "failed_count": failed,
                                                           "msg": request.query_params.get("msg", ""),
                                                           "threshold": config.CLASSIFY_MIN_CONFIDENCE, **context})
 
@@ -103,8 +124,10 @@ def create_web_app(lifespan=None) -> FastAPI:
     async def dashboard(request: Request):
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
-        return page(request, "dashboard.html", stats=db.stats(), providers=db.providers(),
-                    categories={c.key: c for c in db.categories(active_only=False)})
+        from datetime import datetime
+        return page(request, "dashboard.html", stats=db.stats(), providers=db.providers(), dash=db.dashboard(),
+                    categories={c.key: c for c in db.categories(active_only=False)},
+                    now_local=datetime.now(config.TIMEZONE).strftime("%A %d %B %Y, %H:%M"))
 
     @app.post("/providers/{provider_id}/{action}")
     async def provider_action(request: Request, provider_id: int, action: str, csrf: str = Form(...),

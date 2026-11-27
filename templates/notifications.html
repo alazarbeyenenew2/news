@@ -1,10 +1,12 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block heading %}Failed alerts{% endblock %}
+{% block subheading %}<p>Alerts that failed for good or ran out of attempts.</p>{% endblock %}
+{% block head_actions %}{% if failed %}<form method="post" action="/notifications/retry" style="margin:0"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="primary" type="submit">{{ icon("refresh", 16) }} Retry all</button></form>{% endif %}{% endblock %}
 {% block content %}
 <div class="card">
-  <header style="margin-bottom:8px"><h2 style="margin:0">⚠️ Failed alerts</h2>
-    {% if failed %}<form method="post" action="/notifications/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="primary" type="submit">Retry all</button></form>{% endif %}
-  </header>
-  <p class="small muted">Alerts that failed permanently or ran out of attempts. Users who blocked the bot are marked as such and not retried.</p>
+  <h2>{{ icon("alert") }} {{ failed | length }} failed</h2>
+  <p class="small muted" style="margin-top:-6px">Alerts that failed permanently or ran out of attempts. Users who blocked the bot are marked as such and not retried.</p>
   <div class="table-wrap">
   <table>
     <thead><tr><th>User</th><th>Article</th><th>Attempts</th><th>Error</th><th>When</th><th></th></tr></thead>
@@ -20,7 +22,7 @@
           <input type="hidden" name="notification_id" value="{{ f.id }}"><button type="submit">Retry</button></form></td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="muted" style="text-align:center;padding:30px">No failed alerts. 🎉</td></tr>
+      <tr><td colspan="6" class="muted" style="text-align:center;padding:42px">{{ icon("check", 28) }}<br>No failed alerts. Everything got through.</td></tr>
     {% endfor %}
     </tbody>
   </table>

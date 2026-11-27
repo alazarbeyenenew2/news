@@ -1,78 +1,210 @@
+{% from "_icons.html" import icon %}
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}{{ bot_name }} Admin{% endblock %}</title>
+  <script>
+    // Apply a saved light/dark choice before the page paints (falls back to the system setting).
+    try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
   <style>
     :root {
-      --bg: #f5f6f8; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e5e7eb;
-      --primary: #2563eb; --danger: #dc2626; --ok: #16a34a; --warn: #d97706;
+      --bg: #f5f6fb; --surface: #ffffff; --surface-2: #f1f3f9; --surface-3: #e9ecf5;
+      --text: #0f172a; --muted: #64748b; --line: #e5e8f1;
+      --accent: #6366f1; --accent-2: #8b5cf6; --accent-soft: rgba(99, 102, 241, .12);
+      --ok: #10b981; --warn: #f59e0b; --bad: #ef4444; --info: #0ea5e9;
+      --ok-soft: rgba(16, 185, 129, .13); --warn-soft: rgba(245, 158, 11, .16);
+      --bad-soft: rgba(239, 68, 68, .12); --info-soft: rgba(14, 165, 233, .13); --muted-soft: rgba(100, 116, 139, .12);
+      --shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 4px 16px rgba(15, 23, 42, .05);
+      --radius: 14px;
     }
     @media (prefers-color-scheme: dark) {
-      :root { --bg: #0f1218; --card: #181c24; --text: #e6e8ee; --muted: #9aa3b2; --line: #2a303c; }
+      :root:not([data-theme="light"]) {
+        --bg: #0b0f1a; --surface: #111827; --surface-2: #172033; --surface-3: #1e293b;
+        --text: #e5e7eb; --muted: #94a3b8; --line: #243047;
+        --accent-soft: rgba(129, 140, 248, .16); --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #0b0f1a; --surface: #111827; --surface-2: #172033; --surface-3: #1e293b;
+      --text: #e5e7eb; --muted: #94a3b8; --line: #243047;
+      --accent-soft: rgba(129, 140, 248, .16); --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-           background: var(--bg); color: var(--text); }
-    a { color: var(--primary); }
-    .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-    h1 { font-size: 20px; margin: 0; }
-    h2 { font-size: 16px; margin: 0 0 12px; }
-    nav { display: flex; gap: 4px; flex-wrap: wrap; }
-    nav a { text-decoration: none; color: var(--text); padding: 6px 12px; border-radius: 7px; }
-    nav a.on { background: var(--card); border: 1px solid var(--line); font-weight: 600; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-    button, .btn { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
-                   padding: 6px 12px; border-radius: 7px; cursor: pointer; white-space: nowrap; text-decoration: none; }
-    button:hover { filter: brightness(0.96); }
-    .primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-    .danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-    .ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-    input, textarea, select { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px;
-            background: var(--card); color: var(--text); }
-    textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 13px; }
+    html, body { margin: 0; }
+    body { font: 14.5px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Ethiopic", sans-serif;
+           background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .ico { flex: none; vertical-align: -3px; }
     .muted { color: var(--muted); }
-    .small { font-size: 13px; }
-    .flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px;
-             background: color-mix(in srgb, var(--primary) 12%, transparent); }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
-    .stat b { display: block; font-size: 24px; }
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-    th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
-    .badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; margin: 1px 0; }
-    .b-on { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
-    .b-off { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); }
-    .b-warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-    .b-bad { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
-    .b-info { background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--primary); }
-    .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
+    .small { font-size: 12.5px; }
+    .num { font-variant-numeric: tabular-nums; }
+
+    /* ---------- layout ---------- */
+    .app { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+    .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 6px;
+               padding: 22px 14px; background: var(--surface); border-right: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; font-weight: 700; font-size: 16px; }
+    .brand .logo { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: #fff;
+                   background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 6px 16px rgba(99, 102, 241, .35); }
+    .brand small { display: block; font-weight: 500; font-size: 11.5px; color: var(--muted); }
+    .nav { display: flex; flex-direction: column; gap: 2px; }
+    .nav a { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 10px; color: var(--muted);
+             font-weight: 550; text-decoration: none; transition: background .15s, color .15s; }
+    .nav a:hover { background: var(--surface-2); color: var(--text); }
+    .nav a.on { background: var(--accent-soft); color: var(--accent); }
+    .nav .count { margin-left: auto; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px;
+                  background: var(--bad-soft); color: var(--bad); }
+    .sidebar .bottom { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .sidebar .bottom button { width: 100%; justify-content: flex-start; background: transparent; border-color: transparent; color: var(--muted); }
+    .sidebar .bottom button:hover { background: var(--surface-2); color: var(--text); }
+    .main { min-width: 0; padding: 28px 32px 48px; }
+    .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+    .page-head h1 { margin: 0; font-size: 24px; letter-spacing: -.02em; }
+    .page-head p { margin: 4px 0 0; color: var(--muted); }
+
+    /* ---------- surfaces ---------- */
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+            padding: 20px; margin-bottom: 18px; box-shadow: var(--shadow); }
+    .card > h2, .card-head h2 { font-size: 15px; margin: 0 0 14px; display: flex; align-items: center; gap: 8px; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .card-head h2 { margin: 0; }
+    .grid { display: grid; gap: 18px; }
+    .grid > .card { margin-bottom: 0; }
+    .cols-2 { grid-template-columns: 2fr 1fr; }
+    .flash { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 12px; margin-bottom: 18px;
+             background: var(--accent-soft); color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+
+    /* ---------- controls ---------- */
+    button, .btn { font: inherit; font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 7px;
+                   border: 1px solid var(--line); background: var(--surface); color: var(--text); padding: 7px 13px;
+                   border-radius: 9px; cursor: pointer; white-space: nowrap; text-decoration: none; transition: filter .15s, background .15s; }
+    button:hover, .btn:hover { background: var(--surface-2); text-decoration: none; }
+    button:disabled { opacity: .45; cursor: default; }
+    .primary { color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+    .primary:hover { background: linear-gradient(135deg, var(--accent), var(--accent-2)); filter: brightness(1.08); }
+    .danger { color: var(--bad); background: var(--bad-soft); border-color: transparent; }
+    .danger:hover { background: var(--bad-soft); filter: brightness(1.05); }
+    .ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+    .ok:hover { background: var(--ok-soft); filter: brightness(1.05); }
+    input, textarea, select { font: inherit; padding: 8px 11px; border: 1px solid var(--line); border-radius: 9px;
+                              background: var(--surface-2); color: var(--text); outline: none; transition: border-color .15s, box-shadow .15s; }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: var(--surface); }
+    textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+    label { font-size: 12.5px; color: var(--muted); }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
     .actions form { margin: 0; }
-    details summary { cursor: pointer; color: var(--muted); }
-    .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+    details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; margin-top: 6px; list-style: none; }
+    details summary::before { content: "▸ "; }
+    details[open] summary::before { content: "▾ "; }
+    .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+    .search { position: relative; display: flex; align-items: center; }
+    .search .ico { position: absolute; left: 11px; color: var(--muted); }
+    .search input { padding-left: 34px; min-width: 260px; }
+
+    /* ---------- badges / status ---------- */
+    .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 650; padding: 2px 9px;
+             border-radius: 999px; margin: 1px 2px 1px 0; white-space: nowrap; }
+    .b-on { background: var(--ok-soft); color: var(--ok); }
+    .b-off { background: var(--muted-soft); color: var(--muted); }
+    .b-warn { background: var(--warn-soft); color: #b45309; }
+    .b-bad { background: var(--bad-soft); color: var(--bad); }
+    .b-info { background: var(--accent-soft); color: var(--accent); }
+    :root[data-theme="dark"] .b-warn { color: var(--warn); }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .b-warn { color: var(--warn); } }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+    .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+    .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+    .dot.bad { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+    .dot.off { background: var(--muted); opacity: .5; }
+
+    /* ---------- tables ---------- */
+    .table-wrap { overflow-x: auto; margin: 0 -20px -20px; border-top: 1px solid var(--line); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th:first-child, td:first-child { padding-left: 20px; }
+    th:last-child, td:last-child { padding-right: 20px; }
+    th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650;
+         background: var(--surface-2); position: sticky; top: 0; }
+    tbody tr { transition: background .12s; }
+    tbody tr:hover { background: var(--surface-2); }
+    tbody tr:last-child td { border-bottom: 0; }
+
+    /* ---------- stats ---------- */
+    .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 18px; }
+    @media (max-width: 1500px) { .stats { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 640px) { .stats { grid-template-columns: repeat(2, 1fr); gap: 12px; } .stat b { font-size: 24px; } }
+    .stats .card { margin: 0; }
+    .stat { display: flex; flex-direction: column; gap: 4px; position: relative; overflow: hidden; }
+    .stat .chip { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; margin-bottom: 8px; }
+    .stat .label { color: var(--muted); font-size: 13px; font-weight: 550; }
+    .stat b { font-size: 28px; line-height: 1.1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .stat .sub { font-size: 12.5px; color: var(--muted); }
+    .tone-accent .chip { background: var(--accent-soft); color: var(--accent); }
+    .tone-ok .chip { background: var(--ok-soft); color: var(--ok); }
+    .tone-warn .chip { background: var(--warn-soft); color: var(--warn); }
+    .tone-bad .chip { background: var(--bad-soft); color: var(--bad); }
+    .tone-info .chip { background: var(--info-soft); color: var(--info); }
+
+    /* ---------- responsive ---------- */
+    @media (max-width: 1100px) { .cols-2 { grid-template-columns: 1fr; } }
+    @media (max-width: 860px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: sticky; top: 0; z-index: 10; height: auto; flex-direction: row; align-items: center; gap: 4px;
+                 padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+      .brand { padding: 0 8px 0 0; }
+      .brand small { display: none; }
+      .nav { flex-direction: row; }
+      .nav a { padding: 8px 10px; white-space: nowrap; }
+      .nav a span.label { display: none; }
+      .sidebar .bottom { margin: 0 0 0 auto; flex-direction: row; padding: 0; border: 0; }
+      .sidebar .bottom span.label { display: none; }
+      .main { padding: 20px 16px 40px; }
+      .search input { min-width: 0; width: 100%; }
+    }
   </style>
+  {% block head %}{% endblock %}
 </head>
 <body>
-  <div class="wrap">
-    {% block header %}
-    <header>
-      <h1>📰 {{ bot_name }} Admin</h1>
-      <nav>
-        {% set path = request.url.path %}
-        <a href="/" class="{{ 'on' if path == '/' }}">Overview</a>
-        <a href="/categories" class="{{ 'on' if path == '/categories' }}">Topics</a>
-        <a href="/articles" class="{{ 'on' if path == '/articles' }}">Articles</a>
-        <a href="/notifications" class="{{ 'on' if path == '/notifications' }}">Failed alerts</a>
-        <a href="/users" class="{{ 'on' if path == '/users' }}">Users</a>
-      </nav>
-      <form method="post" action="/logout"><button type="submit">Log out</button></form>
-    </header>
-    {% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
-    {% endblock %}
+{% block body %}
+{% set path = request.url.path %}
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">{{ icon("rss", 18) }}</span><div>{{ bot_name }}<small>Admin</small></div></div>
+    <nav class="nav">
+      <a href="/" class="{{ 'on' if path == '/' }}">{{ icon("grid") }}<span class="label">Overview</span></a>
+      <a href="/categories" class="{{ 'on' if path == '/categories' }}">{{ icon("tag") }}<span class="label">Topics</span></a>
+      <a href="/articles" class="{{ 'on' if path == '/articles' }}">{{ icon("news") }}<span class="label">Articles</span></a>
+      <a href="/notifications" class="{{ 'on' if path == '/notifications' }}">{{ icon("alert") }}<span class="label">Failed alerts</span>
+        {% if failed_count %}<span class="count">{{ failed_count }}</span>{% endif %}</a>
+      <a href="/users" class="{{ 'on' if path == '/users' }}">{{ icon("users") }}<span class="label">Users</span></a>
+    </nav>
+    <div class="bottom">
+      <button type="button" id="theme" title="Switch light / dark">{{ icon("moon") }}<span class="label">Theme</span></button>
+      <form method="post" action="/logout" style="margin:0"><button type="submit">{{ icon("logout") }}<span class="label">Log out</span></button></form>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="page-head">
+      <div><h1>{% block heading %}{{ bot_name }}{% endblock %}</h1>{% block subheading %}{% endblock %}</div>
+      <div class="actions">{% block head_actions %}{% endblock %}</div>
+    </div>
+    {% if msg %}<div class="flash">{{ icon("check") }}<span>{{ msg }}</span></div>{% endif %}
     {% block content %}{% endblock %}
-  </div>
+  </main>
+</div>
+<script>
+  document.getElementById("theme").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
+  });
+</script>
+{% endblock %}
 </body>
 </html>

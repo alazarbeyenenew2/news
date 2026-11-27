@@ -1,14 +1,31 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Sign in · {{ bot_name }} Admin{% endblock %}
-{% block header %}{% endblock %}
-{% block content %}
-<div class="card" style="max-width:360px;margin:10vh auto 0">
-  <h1 style="margin-bottom:16px">{{ bot_name }} Admin</h1>
-  {% if error %}<p style="color:var(--danger)">{{ error }}</p>{% endif %}
-  <form method="post" action="/login" style="display:grid;gap:10px">
-    <input name="username" placeholder="Username" autocomplete="username" required autofocus>
-    <input name="password" type="password" placeholder="Password" autocomplete="current-password" required>
-    <button class="primary" type="submit">Sign in</button>
-  </form>
+{% block body %}
+<style>
+  .login { min-height: 100vh; display: grid; place-items: center; padding: 24px;
+           background: radial-gradient(1200px 600px at 10% -10%, var(--accent-soft), transparent 60%),
+                       radial-gradient(900px 500px at 110% 110%, rgba(139, 92, 246, .14), transparent 60%), var(--bg); }
+  .login .card { width: 100%; max-width: 380px; padding: 30px; }
+  .login .logo { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; color: #fff; margin-bottom: 16px;
+                 background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 22px rgba(99, 102, 241, .35); }
+  .login h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.02em; }
+  .login form { display: grid; gap: 12px; margin-top: 22px; }
+  .login input { padding: 11px 13px; }
+  .login button { justify-content: center; padding: 11px; font-size: 14px; }
+  .login .error { color: var(--bad); background: var(--bad-soft); padding: 9px 12px; border-radius: 9px; font-size: 13px; margin-top: 16px; }
+</style>
+<div class="login">
+  <div class="card">
+    <div class="logo">{{ icon("rss", 22) }}</div>
+    <h1>{{ bot_name }} Admin</h1>
+    <div class="muted">Sign in to manage sources, topics and users.</div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <input name="username" placeholder="Username" autocomplete="username" required autofocus>
+      <input name="password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+  </div>
 </div>
 {% endblock %}
