@@ -635,3 +635,25 @@ def test_welcome_migration_resets_users_who_saw_fewer_than_ten():
     db.update_user(400, welcome_news_at=now_utc().isoformat())
     db.execute(Path("migrations/011_welcome_news_for_everyone.sql").read_text())
     assert db.get_user(400).welcome_news_at is None
+
+
+def test_user_count_shown_at_the_top_of_the_bot(chat):
+    from bot import UserCountBadge
+    onboard(chat)
+    onboard(chat, user=300)
+    db.upsert_user(301, 301, None, "Gone")
+    db.update_user(301, status="blocked")  # blocked the bot: not counted
+    badge = UserCountBadge(chat.app.bot)
+    chat.api.clear()
+    assert chat.loop.run_until_complete(badge.run_once()) is True
+    shorts = [p for m, p in chat.api.calls if m == "setMyShortDescription"]
+    longs = [p for m, p in chat.api.calls if m == "setMyDescription"]
+    assert len(shorts) == len(longs) == 3  # default, English, Amharic
+    assert shorts[0]["short_description"].startswith("👥 2 users") and "language_code" not in shorts[0]
+    assert "2 people use" in longs[1]["description"] and longs[2]["language_code"] == "am"
+    assert all(len(p["short_description"]) <= 120 for p in shorts)
+    chat.api.clear()
+    assert chat.loop.run_until_complete(badge.run_once()) is False and chat.api.calls == []  # unchanged
+    db.upsert_user(302, 302, None, "New")
+    assert chat.loop.run_until_complete(badge.run_once()) is True
+    assert chat.api.last("setMyShortDescription")["short_description"].startswith("👥 3 ")

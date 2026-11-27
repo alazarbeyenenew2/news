@@ -455,6 +455,10 @@ class Database:
             (idle_since,)).fetchall()
         return [_row(User, r) for r in rows]
 
+    def user_count(self) -> int:
+        """People using the bot: everyone who started it, minus those who blocked it or were disabled."""
+        return self._one("SELECT COUNT(*) FROM users WHERE status = 'active'")
+
     def welcome_news_due(self, limit: int = 20) -> list[User]:
         """Onboarded, active users with alerts on who haven't had their welcome news yet."""
         rows = self.execute(

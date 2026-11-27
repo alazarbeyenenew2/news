@@ -65,6 +65,7 @@ ADMIN = "ad:"            # ad:<action>[:<id>][:<page>]
 BACKUP = "bk:"           # bk:now | bk:on | bk:off
 PULL_MORE = "pull:more"  # the "Show more" button under older 📥 Latest news batches
 CATCH_UP_PER_MINUTE = 20  # users whose missing welcome news starts each minute
+USER_COUNT_MINUTES = 10  # how often the user count in the bot's description is refreshed
 NOOP = "noop"
 PULL_REFRESH_SECONDS = 12  # how long 📥 Latest news waits for the feeds it re-checks
 CVE = "cv:"  # cv:menu|on|off|all|sev[:<level>]|p:<page>|t:<page>:<tech id>|r:<page>:<hash>|add|addx|csv|close
@@ -818,6 +819,42 @@ async def send_welcome_news(bot, user: User) -> int:
     sent = await _deliver_today(bot, user, items, gap=config.NEWS_GAP_SECONDS)
     log.info("Sent %s welcome stories to %s", sent, user.telegram_id)
     return sent
+
+
+class UserCountBadge:
+    """Keeps the number of users at the top of the bot in Telegram: in its profile line (short
+    description) and in the text shown above an empty chat (description), in English and Amharic.
+    Checked every USER_COUNT_MINUTES; Telegram is only told when the number changed."""
+
+    def __init__(self, bot):
+        self.bot = bot
+        self.shown: int | None = None
+
+    async def run_forever(self) -> None:
+        while True:
+            try:
+                await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Updating the user count failed")
+            await asyncio.sleep(USER_COUNT_MINUTES * 60)
+
+    async def run_once(self) -> bool:
+        count = db.user_count()
+        if count == self.shown:
+            return False
+        number = f"{count:,}"
+        try:
+            for language, L in ((None, texts.get("en")), ("en", texts.get("en")), ("am", texts.get("am"))):
+                await self.bot.set_my_short_description(L.bot_short_description(number)[:120], language_code=language)
+                await self.bot.set_my_description(L.bot_description(number)[:512], language_code=language)
+        except TelegramError as e:
+            log.warning("Could not update the user count in the bot's description: %s", e)
+            return False
+        self.shown = count
+        log.info("Bot description now shows %s users", count)
+        return True
 
 
 class OnboardingAutosave:

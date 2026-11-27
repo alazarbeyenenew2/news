@@ -91,6 +91,19 @@ def auto_saved(topics: str) -> str:
 
 DIGEST_REMOVED = ("📰 ዕለታዊ ማጠቃለያ ተቋርጧል፦ አሁን እያንዳንዱ ዜና እንደወጣ ⚡ ወዲያውኑ ይደርስዎታል። "
                   "ያላዩዋቸውን የዛሬ ዜናዎች ለማግኘት በማንኛውም ጊዜ 📥 የቅርብ ዜናዎችን ይንኩ።")
+def bot_short_description(users: str) -> str:
+    """The bot's profile line (also shown when someone shares the bot), max 120 characters."""
+    return f"👥 {users} ተጠቃሚዎች · የግል የዜና ማሳወቂያ፦ ርዕሶችዎን ይምረጡ፣ ሰበር ዜና ወዲያውኑ ያግኙ።"
+
+
+def bot_description(users: str) -> str:
+    """Shown at the top of the chat before someone presses Start, max 512 characters."""
+    return (f"👥 {users} ሰዎች {BOT}ን ይጠቀማሉ።\n\n"
+            "📰 ከታማኝ ምንጮች የግል የዜና ማሳወቂያ፦ ርዕሶችዎን (ዓለም፣ ኢትዮጵያ፣ ስፖርት፣ ቴክኖሎጂ፣ ንግድ…) ይምረጡ፤ "
+            "እያንዳንዱ ዜና እንደወጣ ይደርስዎታል።\n"
+            "🛡 ለሚጠቀሙባቸው ቴክኖሎጂዎች የCVE ሪፖርቶችም አሉ።")
+
+
 WELCOME_NEWS_INTRO = "📰 <b>ለመጀመር የቅርብ ጊዜ ዜናዎች</b>፦"
 
 ONBOARDING_SKIPPED = (f"👌 እስካሁን ርዕስ አልመረጡም።\n{LINE}\n"

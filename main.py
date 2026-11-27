@@ -12,7 +12,7 @@ logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", le
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 import config  # noqa: E402
-from bot import OnboardingAutosave, build_application, nightly_backup_loop  # noqa: E402
+from bot import OnboardingAutosave, UserCountBadge, build_application, nightly_backup_loop  # noqa: E402
 from collector import Collector  # noqa: E402
 from db import db, load_seed, load_technologies  # noqa: E402
 from delivery import Sender  # noqa: E402
@@ -41,7 +41,8 @@ async def lifespan(app: FastAPI):
     app.state.telegram = tg_app
     log.info("Bot started as @%s", tg_app.bot.username)
 
-    tasks = [asyncio.create_task(nightly_backup_loop(tg_app), name="backup")]
+    tasks = [asyncio.create_task(nightly_backup_loop(tg_app), name="backup"),
+             asyncio.create_task(UserCountBadge(tg_app.bot).run_forever(), name="user-count")]
     sender = Sender(tg_app.bot)
     app.state.sender = tg_app.bot_data["sender"] = sender
     if config.DELIVERY_ENABLED:

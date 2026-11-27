@@ -92,6 +92,19 @@ def auto_saved(topics: str) -> str:
 
 DIGEST_REMOVED = ("📰 The daily digest has been retired: every story now arrives ⚡ instantly, as soon as "
                   "it's published. Tap 📥 Latest news any time for today's stories you haven't seen.")
+def bot_short_description(users: str) -> str:
+    """The bot's profile line (also shown when someone shares the bot), max 120 characters."""
+    return f"👥 {users} users · Personal news alerts: pick your topics and get breaking news instantly."
+
+
+def bot_description(users: str) -> str:
+    """Shown at the top of the chat before someone presses Start, max 512 characters."""
+    return (f"👥 {users} people use {BOT}.\n\n"
+            "📰 Personal news alerts from trusted sources: choose your topics (world, Ethiopia, sports, "
+            "technology, business…) and get each story as soon as it's published.\n"
+            "🛡 Optional CVE reports for the technologies you use.")
+
+
 WELCOME_NEWS_INTRO = "📰 <b>The latest news</b> to get you started:"
 
 ONBOARDING_SKIPPED = (f"👌 No topics yet.\n{LINE}\n"
