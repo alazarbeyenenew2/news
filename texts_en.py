@@ -26,8 +26,6 @@ CMD_START = "Start / main menu"
 CMD_INTERESTS = "Choose your topics"
 CMD_SOURCES = "News sources"
 CMD_LANGUAGE = "Change language"
-CMD_PAUSE = "Pause alerts"
-CMD_RESUME = "Resume alerts"
 CMD_SETTINGS = "Settings"
 CMD_HELP = "How it works"
 CMD_SUPPORT = "Contact support"
@@ -122,13 +120,9 @@ INTERESTS_EMPTY = ("⚠️ <b>No topics selected.</b>\nYou won't get alerts unti
                    "(🗞 My topics or /interests).")
 CATEGORY_GONE = "That topic isn't available any more."
 
-# ---------- pause / resume ----------
-PAUSED = ("⏸ <b>Alerts paused.</b>\nYour topics are kept. Stories found while paused won't be sent later. "
-          "Tap <b>▶️ Resume alerts</b> to start again.")
-RESUMED = "▶️ <b>Alerts are on again.</b>\nYou'll get new stories for your topics."
-ALREADY_PAUSED = "Alerts are already paused."
-ALREADY_ON = "Alerts are already on."
-RESUMED_NO_TOPICS = "\n\n⚠️ You have no topics yet: tap <b>🗞 My topics</b>."
+# ---------- pause (removed) ----------
+PAUSE_REMOVED = ("🔔 Pausing alerts has been removed: your alerts are on. To get fewer, mute a topic "
+                 "or set a daily limit in ⚙️ Settings.")
 
 # ---------- settings ----------
 SETTINGS_TITLE = "⚙️ <b>Settings</b>"
@@ -139,10 +133,9 @@ ANY_LANGUAGE = "All languages"
 NEWS_LANGUAGES = {"any": "🌐 All languages", "en": "🇬🇧 English only", "am": "🇪🇹 Amharic only"}
 
 
-def settings_text(alerts: str, limit: str, news_language: str, topics: int, muted: int) -> str:
+def settings_text(limit: str, news_language: str, topics: int, muted: int) -> str:
     muted_text = f" ({muted} muted)" if muted else ""
     return (f"{SETTINGS_TITLE}\n{LINE}\n"
-            f"🔔 Alerts: <b>{alerts}</b>\n"
             f"🔢 Daily limit: <b>{limit}</b>\n"
             f"🗣 News language: <b>{news_language}</b>\n"
             f"🗞 Topics: <b>{topics}</b>{muted_text}")
@@ -152,8 +145,6 @@ def limit_text(n: int) -> str:
     return NO_LIMIT if not n else f"{n} alerts"
 
 
-SET_PAUSE = "⏸ Pause"
-SET_RESUME = "▶️ Resume"
 SET_LIMIT = "🔢 Daily limit"
 SET_NEWS_LANGUAGE = "🗣 News language"
 SET_MUTE = "🔕 Mute topics"
@@ -228,7 +219,6 @@ HELP = (f"❓ <b>How {BOT} works</b>\n{LINE}\n"
         "/latest — today's stories you haven't seen yet (📥 Latest news)\n"
         "/interests — choose your topics\n"
         "/settings — alerts, daily limit, news language, sources\n"
-        "/pause, /resume — stop or restart alerts\n"
         "/sources — choose your news sources\n"
         "/cve — CVE reports: vulnerabilities in technologies you choose (nginx, Windows…)\n"
         "/language — change the bot language\n\n"
@@ -253,8 +243,9 @@ ONLY_SUPER = "⛔ Only super admins can do that."
 def admin_status(s: dict, web_hint: bool) -> str:
     oldest = s.get("queue_age") or "—"
     text = (f"🛠 <b>Admin</b>\n{LINE}\n"
-            f"👥 Users: <b>{s['users']}</b> · getting alerts {s['active_users']} · paused {s['paused_users']}"
-            f" · blocked the bot {s['blocked_users']}\n"
+            f"👥 <b>{s['user_count']:,} users</b> · new today {s.get('new_users_today', 0)}\n"
+            f"   getting alerts {s['active_users']} · blocked the bot {s['blocked_users']}"
+            f" · disabled {s.get('disabled_users', 0)}\n"
             f"📡 Sources: <b>{s['providers_enabled']}</b> on · {s['providers_failing']} failing\n"
             f"📰 Articles today: <b>{s['articles_today']}</b> · same story elsewhere {s['duplicates_today']}"
             f" · waiting for review {s['low_confidence_today']}\n"

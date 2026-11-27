@@ -1,4 +1,4 @@
-"""Telegram bot: onboarding, topics, settings, pause / resume, sources, and admin tools.
+"""Telegram bot: onboarding, topics, settings, sources, and admin tools.
 
 Alerts themselves are sent by delivery.py; news is collected by collector.py. Every text shown in
 Telegram lives in texts_am.py / texts_en.py; each person sees their own language.
@@ -98,7 +98,6 @@ def _commands(user: User) -> list[BotCommand]:
     commands = [BotCommand("start", L.CMD_START), BotCommand("latest", L.CMD_LATEST),
                 BotCommand("interests", L.CMD_INTERESTS),
                 BotCommand("settings", L.CMD_SETTINGS),
-                BotCommand("pause", L.CMD_PAUSE), BotCommand("resume", L.CMD_RESUME),
                 BotCommand("sources", L.CMD_SOURCES), BotCommand("language", L.CMD_LANGUAGE),
                 BotCommand("cve", L.CMD_CVE), BotCommand("help", L.CMD_HELP)]
     if config.SUPPORT_USERNAME:
@@ -114,17 +113,13 @@ def main_keyboard(user: User) -> ReplyKeyboardMarkup:
     L = tr(user)
     rows = [[KeyboardButton(L.BTN_PULL)],
             [KeyboardButton(L.BTN_TOPICS), KeyboardButton(L.BTN_SETTINGS)],
-            [KeyboardButton(L.BTN_PAUSE if user.notifications_enabled else L.BTN_RESUME),
-             KeyboardButton(L.BTN_SOURCES)],
-            [KeyboardButton(L.BTN_CVE), KeyboardButton(texts.LANGUAGE_BUTTON)],
-            [KeyboardButton(L.BTN_HELP)]]
+            [KeyboardButton(L.BTN_SOURCES), KeyboardButton(L.BTN_CVE)],
+            [KeyboardButton(L.BTN_HELP)],
+            [KeyboardButton(texts.LANGUAGE_BUTTON)]]
     if config.SUPPORT_USERNAME:
-        rows[-1].append(KeyboardButton(L.BTN_CONTACT))
+        rows[-2].append(KeyboardButton(L.BTN_CONTACT))
     if user.is_admin:
-        if len(rows[-1]) == 1:  # no Contact us button: Admin fits beside Help
-            rows[-1].append(KeyboardButton(L.BTN_ADMIN))
-        else:
-            rows.append([KeyboardButton(L.BTN_ADMIN)])
+        rows[-1].append(KeyboardButton(L.BTN_ADMIN))
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True,
                                input_field_placeholder=L.KEYBOARD_PLACEHOLDER)
 
@@ -514,38 +509,16 @@ async def onboarding_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE
     await _finish_onboarding(update, context, user)
 
 
-# ---------- pause / resume ----------
-async def pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# ---------- pause (removed) ----------
+async def pause_removed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/pause, /resume and the ⏸ / ▶️ buttons of older keyboards: alerts can't be paused any more.
+    Turns alerts back on for anyone still paused and shows the current keyboard."""
     user = await _active_user(update, context)
     if not user:
         return
-    L = tr(user)
     if not user.notifications_enabled:
-        await _send(context, update.effective_chat.id, L.ALREADY_PAUSED, main_keyboard(user))
-        return
-    user = _set_paused(user, True)
-    await _send(context, update.effective_chat.id, L.PAUSED, main_keyboard(user))
-
-
-async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = await _active_user(update, context)
-    if not user:
-        return
-    L = tr(user)
-    if user.notifications_enabled:
-        await _send(context, update.effective_chat.id, L.ALREADY_ON, main_keyboard(user))
-        return
-    user = _set_paused(user, False)
-    text = L.RESUMED + ("" if any(db.interests(user.telegram_id).values()) else L.RESUMED_NO_TOPICS)
-    await _send(context, update.effective_chat.id, text, main_keyboard(user))
-
-
-def _set_paused(user: User, paused: bool) -> User:
-    if paused:
-        # Nothing found while paused is sent later.
-        db.skip_queued_for_user(user.telegram_id, "paused")
-    log.info("User %s %s alerts", user.telegram_id, "paused" if paused else "resumed")
-    return db.update_user(user.telegram_id, notifications_enabled=not paused)
+        user = db.update_user(user.telegram_id, notifications_enabled=True)
+    await _send(context, update.effective_chat.id, tr(user).PAUSE_REMOVED, main_keyboard(user))
 
 
 # ---------- settings ----------
@@ -553,14 +526,11 @@ def _settings_screen(user: User) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
     interests_ = db.interests(user.telegram_id)
     text = L.settings_text(
-        L.ON if user.notifications_enabled else L.OFF,
         L.limit_text(user.max_per_day),
         L.NEWS_LANGUAGES.get(user.news_language, user.news_language),
         len(interests_), sum(1 for on in interests_.values() if not on),
     )
     rows = _grid([
-        (L.SET_PAUSE if user.notifications_enabled else L.SET_RESUME,
-         f"{SETTINGS}{'pause' if user.notifications_enabled else 'resume'}"),
         (L.SET_LIMIT, f"{SETTINGS}limit"),
         (L.SET_NEWS_LANGUAGE, f"{SETTINGS}nl"),
         (L.SET_TOPICS, f"{SETTINGS}topics"),
@@ -610,12 +580,7 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer()
         await _show_sources(update, context, user, "s")
         return
-    if action in ("pause", "resume"):
-        user = _set_paused(user, action == "pause")
-        await query.answer()
-        await _send(context, update.effective_chat.id, L.PAUSED if action == "pause" else L.RESUMED,
-                    main_keyboard(user))
-    elif action == "limit":
+    if action == "limit":
         if value is not None and value.isdigit() and int(value) in DAILY_LIMITS:
             user = db.update_user(user.telegram_id, max_per_day=int(value))
             await query.answer(L.limit_text(user.max_per_day))
@@ -727,7 +692,7 @@ async def wait_for_batches() -> None:
 async def pull_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """📥 Latest news or /latest: re-check the user's sources, then send today's stories for their topics
     that they haven't received yet, newest first (up to LATEST_NEWS_MAX), one after another without any
-    "show more" step. Works while alerts are paused too."""
+    "show more" step."""
     user = await _active_user(update, context)
     if not user:
         return
@@ -1491,14 +1456,14 @@ def build_application(request=None) -> Application:
     private = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
 
     for command, handler in [("start", start), ("latest", pull_news), ("interests", interests), ("topics", interests),
-                             ("settings", settings), ("digest", digest_removed), ("pause", pause), ("resume", resume),
+                             ("settings", settings), ("digest", digest_removed), ("pause", pause_removed), ("resume", pause_removed),
                              ("sources", sources), ("language", choose_language), ("help", help_command),
                              ("admin", admin), ("backup", backup_menu), ("cve", cve), ("support", support)]:
         app.add_handler(CommandHandler(command, handler, filters=private))
 
     # Reply keyboard buttons, in every language.
-    for name, handler in [("BTN_TOPICS", interests), ("BTN_SETTINGS", settings), ("BTN_PAUSE", pause),
-                          ("BTN_RESUME", resume), ("BTN_DIGEST", digest_removed), ("BTN_SOURCES", sources),
+    for name, handler in [("BTN_TOPICS", interests), ("BTN_SETTINGS", settings), ("BTN_PAUSE", pause_removed),
+                          ("BTN_RESUME", pause_removed), ("BTN_DIGEST", digest_removed), ("BTN_SOURCES", sources),
                           ("BTN_HELP", help_command), ("BTN_ADMIN", admin), ("BTN_PULL", pull_news),
                           ("BTN_CVE", cve), ("BTN_CONTACT", support)]:
         app.add_handler(MessageHandler(private & filters.Text(texts.labels(name)), handler))

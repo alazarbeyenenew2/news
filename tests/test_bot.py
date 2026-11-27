@@ -167,14 +167,24 @@ def test_update_interests_without_onboarding_again(chat):
     assert "No topics selected" in chat.tap("tpx:i").last("editMessageText")["text"]
 
 
-def test_pause_and_resume(chat):
+def test_pausing_is_gone(chat):
     onboard(chat)
-    api = chat.send("/pause")
-    assert not db.get_user(USER).notifications_enabled
-    assert api.last("sendMessage")["reply_markup"]["keyboard"][2][0]["text"] == texts_en.BTN_RESUME
-    api = chat.send(texts_en.BTN_RESUME)
-    assert db.get_user(USER).notifications_enabled
-    assert api.last("sendMessage")["reply_markup"]["keyboard"][2][0]["text"] == texts_en.BTN_PAUSE
+    from bot import main_keyboard
+    labels = [b.text for row in main_keyboard(db.get_user(USER)).keyboard for b in row]
+    assert texts_en.BTN_PAUSE not in labels and texts_en.BTN_RESUME not in labels
+    assert "pause" not in str(chat.send("/settings").last("sendMessage")["reply_markup"])
+    db.update_user(USER, notifications_enabled=False)  # paused before pausing was removed
+    for api in (chat.send("/pause"), chat.send(texts_en.BTN_RESUME), chat.send(texts_en.BTN_PAUSE)):
+        assert texts_en.PAUSE_REMOVED in api.last("sendMessage")["text"]
+    assert db.get_user(USER).notifications_enabled  # turned back on
+    assert "Daily limit" in chat.tap("st:pause").last("editMessageText")["text"]  # old button: settings
+
+
+def test_admin_screen_shows_user_count(chat):
+    onboard(chat, SUPER)
+    onboard(chat, user=300)
+    text = chat.send("/admin", SUPER).last("sendMessage")["text"]
+    assert "👥 <b>2 users</b>" in text and "new today 2" in text
 
 
 def test_settings_limit_language_mute(chat):
@@ -238,7 +248,7 @@ def test_admin_tools_are_admin_only(chat):
     keyboard = chat.api.last("sendMessage")["reply_markup"]["keyboard"]
     assert texts_en.BTN_ADMIN in [b["text"] for row in keyboard for b in row]
     api = chat.send("/admin", SUPER)
-    assert "Users:" in api.last("sendMessage")["text"]
+    assert " users</b>" in api.last("sendMessage")["text"]
     chat.tap(f"ad:pt:{provider.id}:0", SUPER)
     assert db.get_provider(provider.id).is_enabled
     chat.tap(f"ad:ct:{cid('entertainment')}", SUPER)
@@ -344,10 +354,9 @@ def test_pull_only_today_and_only_followed_unmuted_topics(chat):
     assert len(_alerts(chat.send(texts_en.BTN_PULL))) == 1
 
 
-def test_pull_works_while_paused_and_needs_topics(chat):
+def test_pull_needs_topics(chat):
     onboard(chat, topics=("sports",))
     _stories("bbc_sport", "s", SPORTS[:1])
-    chat.send("/pause")
     assert len(_alerts(chat.send(texts_en.BTN_PULL))) == 1
     db.set_interests(USER, set())
     assert "Choose your topics first" in chat.send("/latest").last("sendMessage")["text"]

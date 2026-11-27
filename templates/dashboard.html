@@ -38,7 +38,7 @@
 <div class="stats">
   <div class="card stat tone-accent"><span class="chip">{{ icon("users", 20) }}</span>
     <span class="label">Users getting alerts</span><b>{{ stats.active_users }}</b>
-    <span class="sub">of {{ stats.users }} · {{ stats.paused_users }} paused · {{ stats.blocked_users }} blocked the bot</span></div>
+    <span class="sub">of {{ stats.users }} · {{ stats.new_users_today }} new today · {{ stats.blocked_users }} blocked the bot</span></div>
   <div class="card stat tone-info"><span class="chip">{{ icon("news", 20) }}</span>
     <span class="label">Articles today</span><b>{{ stats.articles_today - stats.cves_today }}</b>
     <span class="sub">{{ stats.duplicates_today }} same story · <a href="/articles?low=1">{{ stats.low_confidence_today }} need review</a></span></div>

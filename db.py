@@ -961,10 +961,12 @@ class Database:
         one = self._one
         return {
             "users": one("SELECT COUNT(*) FROM users"),
+            "user_count": self.user_count(),  # the number shown at the top of the bot in Telegram
             "active_users": one("SELECT COUNT(*) FROM users WHERE status = 'active' AND notifications_enabled"
                                 " AND onboarding_completed"),
-            "paused_users": one("SELECT COUNT(*) FROM users WHERE NOT notifications_enabled"),
             "blocked_users": one("SELECT COUNT(*) FROM users WHERE status = 'blocked'"),
+            "disabled_users": one("SELECT COUNT(*) FROM users WHERE status = 'disabled'"),
+            "new_users_today": one("SELECT COUNT(*) FROM users WHERE created_at >= %s", (since,)),
             "providers_enabled": one("SELECT COUNT(*) FROM providers WHERE is_enabled"),
             "providers_failing": one("SELECT COUNT(*) FROM providers WHERE is_enabled AND consecutive_failures > 0"),
             "articles_today": one("SELECT COUNT(*) FROM articles WHERE fetched_at >= %s", (since,)),

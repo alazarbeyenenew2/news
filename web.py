@@ -331,7 +331,7 @@ def create_web_app(lifespan=None) -> FastAPI:
             request.app.state.profiles.forget(telegram_id)
             return _back("/users", f"{user.display_name} was deleted with all their data.", q=q, page_no=page_no)
         changes = {"disable": {"status": "disabled", "notifications_enabled": False},
-                   "enable": {"status": "active"},
+                   "enable": {"status": "active", "notifications_enabled": True},
                    "make_admin": {"role": "admin"}, "remove_admin": {"role": "user"}}
         if action not in changes:
             raise HTTPException(400, "Unknown action")

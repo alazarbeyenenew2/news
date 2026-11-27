@@ -25,8 +25,6 @@ CMD_START = "መጀመሪያ / ዋና ምናሌ"
 CMD_INTERESTS = "ርዕሶችዎን ይምረጡ"
 CMD_SOURCES = "የዜና ምንጮች"
 CMD_LANGUAGE = "ቋንቋ ቀይር"
-CMD_PAUSE = "ማሳወቂያ አቁም"
-CMD_RESUME = "ማሳወቂያ ቀጥል"
 CMD_SETTINGS = "ቅንብሮች"
 CMD_HELP = "እንዴት እንደሚሠራ"
 CMD_SUPPORT = "ድጋፍ ያግኙ"
@@ -121,13 +119,9 @@ INTERESTS_EMPTY = ("⚠️ <b>ምንም ርዕስ አልተመረጠም።</b>\n
                    "(🗞 የኔ ርዕሶች ወይም /interests)።")
 CATEGORY_GONE = "ይህ ርዕስ ከአሁን በኋላ የለም።"
 
-# ---------- pause / resume ----------
-PAUSED = ("⏸ <b>ማሳወቂያ ቆሟል።</b>\nርዕሶችዎ ተጠብቀዋል። በቆመበት ጊዜ የተገኙ ዜናዎች በኋላ አይላኩም። "
-          "እንደገና ለመጀመር <b>▶️ ማሳወቂያ ቀጥል</b>ን ይንኩ።")
-RESUMED = "▶️ <b>ማሳወቂያ እንደገና በርቷል።</b>\nለርዕሶችዎ አዳዲስ ዜናዎች ይደርስዎታል።"
-ALREADY_PAUSED = "ማሳወቂያ ቀድሞውኑ ቆሟል።"
-ALREADY_ON = "ማሳወቂያ ቀድሞውኑ በርቷል።"
-RESUMED_NO_TOPICS = "\n\n⚠️ እስካሁን ርዕስ የለዎትም፦ <b>🗞 የኔ ርዕሶች</b>ን ይንኩ።"
+# ---------- pause (removed) ----------
+PAUSE_REMOVED = ("🔔 ማሳወቂያ ማቆም ተወግዷል፤ ማሳወቂያዎችዎ በርተዋል። ያነሰ ለማግኘት ርዕስ ድምፅ ያጥፉ "
+                 "ወይም በ⚙️ ቅንብሮች የቀን ገደብ ያስቀምጡ።")
 
 # ---------- settings ----------
 SETTINGS_TITLE = "⚙️ <b>ቅንብሮች</b>"
@@ -138,10 +132,9 @@ ANY_LANGUAGE = "ሁሉም ቋንቋዎች"
 NEWS_LANGUAGES = {"any": "🌐 ሁሉም ቋንቋዎች", "en": "🇬🇧 እንግሊዝኛ ብቻ", "am": "🇪🇹 አማርኛ ብቻ"}
 
 
-def settings_text(alerts: str, limit: str, news_language: str, topics: int, muted: int) -> str:
+def settings_text(limit: str, news_language: str, topics: int, muted: int) -> str:
     muted_text = f" ({muted} ድምፅ የጠፋ)" if muted else ""
     return (f"{SETTINGS_TITLE}\n{LINE}\n"
-            f"🔔 ማሳወቂያ፦ <b>{alerts}</b>\n"
             f"🔢 የቀን ገደብ፦ <b>{limit}</b>\n"
             f"🗣 የዜና ቋንቋ፦ <b>{news_language}</b>\n"
             f"🗞 ርዕሶች፦ <b>{topics}</b>{muted_text}")
@@ -151,8 +144,6 @@ def limit_text(n: int) -> str:
     return NO_LIMIT if not n else f"{n} ማሳወቂያዎች"
 
 
-SET_PAUSE = "⏸ አቁም"
-SET_RESUME = "▶️ ቀጥል"
 SET_LIMIT = "🔢 የቀን ገደብ"
 SET_NEWS_LANGUAGE = "🗣 የዜና ቋንቋ"
 SET_MUTE = "🔕 ርዕስ ድምፅ አጥፋ"
@@ -225,7 +216,6 @@ HELP = (f"❓ <b>{BOT} እንዴት ይሠራል</b>\n{LINE}\n"
         "/latest — ያላዩዋቸው የዛሬ ዜናዎች (📥 የቅርብ ዜናዎች)\n"
         "/interests — ርዕሶችዎን ይምረጡ\n"
         "/settings — ማሳወቂያ፣ የቀን ገደብ፣ የዜና ቋንቋ፣ ምንጮች\n"
-        "/pause, /resume — ማሳወቂያ አቁም ወይም ቀጥል\n"
         "/sources — የዜና ምንጮችዎን ይምረጡ\n"
         "/cve — የCVE ሪፖርቶች፦ በመረጧቸው ቴክኖሎጂዎች (nginx, Windows…) ላይ ያሉ ክፍተቶች\n"
         "/language — የቦቱን ቋንቋ ቀይር\n\n"
@@ -251,8 +241,9 @@ ONLY_SUPER = "⛔ ይህን ማድረግ የሚችሉት ዋና አስተዳዳ�
 def admin_status(s: dict, web_hint: bool) -> str:
     oldest = s.get("queue_age") or "—"
     text = (f"🛠 <b>አስተዳደር</b>\n{LINE}\n"
-            f"👥 ተጠቃሚዎች፦ <b>{s['users']}</b> · ማሳወቂያ የሚቀበሉ {s['active_users']} · ያቆሙ {s['paused_users']}"
-            f" · ቦቱን ያገዱ {s['blocked_users']}\n"
+            f"👥 <b>{s['user_count']:,} ተጠቃሚዎች</b> · ዛሬ አዲስ {s.get('new_users_today', 0)}\n"
+            f"   ማሳወቂያ የሚቀበሉ {s['active_users']}"
+            f" · ቦቱን ያገዱ {s['blocked_users']} · የተዘጉ {s.get('disabled_users', 0)}\n"
             f"📡 ምንጮች፦ <b>{s['providers_enabled']}</b> በርተዋል · {s['providers_failing']} እየወደቁ\n"
             f"📰 የዛሬ ዜናዎች፦ <b>{s['articles_today']}</b> · በሌላ ምንጭ የተደገሙ {s['duplicates_today']}"
             f" · ግምገማ የሚጠብቁ {s['low_confidence_today']}\n"
