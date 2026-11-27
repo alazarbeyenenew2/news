@@ -514,13 +514,7 @@ def _set_mode(user: User, mode: str) -> User:
     dropped rather than sent as a burst."""
     if mode == user.delivery_mode:
         return user
-    if mode == "digest":
-        db.move_held_notifications(user.telegram_id, "digest")
-    else:
-        db.conn.execute("UPDATE notifications SET status = 'skipped', last_error = 'switched to instant'"
-                        " WHERE user_id = ? AND status = 'digest'", (user.telegram_id,))
-        db.conn.commit()
-    return db.update_user(user.telegram_id, delivery_mode=mode)
+    return db.set_delivery_mode(user.telegram_id, mode)
 
 
 # ---------- digest ----------
@@ -816,7 +810,8 @@ async def backup_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def send_backup(app: Application, recipients, nightly: bool) -> None:
     """Make one zipped backup and send it to each recipient."""
-    data, file_name, counts = await asyncio.to_thread(backup.make_backup)
+    # Runs on the event loop thread: the database connection isn't shared across threads.
+    data, file_name, counts = backup.make_backup()
     when = datetime.now(config.TIMEZONE).strftime("%d/%m/%Y %H:%M")
     for chat_id in recipients:
         L = tr(db.get_user(chat_id))

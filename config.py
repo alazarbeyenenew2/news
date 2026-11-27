@@ -29,7 +29,14 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
 # Times shown to users (publication time, digest hour) and the meaning of "today".
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
 
-DATABASE_PATH = os.getenv("DATABASE_PATH", "data/news.db")
+# PostgreSQL. In production the user and password come from GitHub secrets (see README).
+DATABASE = {
+    "host": os.getenv("POSTGRES_HOST", "localhost"),
+    "port": int(os.getenv("POSTGRES_PORT", "5432")),
+    "user": os.getenv("POSTGRES_USER", "newsbot"),
+    "password": os.getenv("POSTGRES_PASSWORD", ""),
+    "dbname": os.getenv("POSTGRES_DB", "newsbot"),
+}
 
 # Categories and providers are copied from these files into the database the first time the bot
 # starts (and when new keys are added). After that they're managed from the admin page / bot.

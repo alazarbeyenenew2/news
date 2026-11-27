@@ -188,7 +188,7 @@ def test_delete_my_data(chat):
     assert db.get_user(USER) is not None
     chat.tap("st:delok")
     assert db.get_user(USER) is None
-    assert db.conn.execute("SELECT COUNT(*) FROM user_interests").fetchone()[0] == 0
+    assert db._one("SELECT COUNT(*) FROM user_interests") == 0
 
 
 def test_sources_and_help(chat):

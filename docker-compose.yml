@@ -9,6 +9,34 @@
 name: news-bot
 
 services:
+  # The database. POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB come from .env (GitHub secrets in
+  # production). They're applied only when the data volume is first created: see README before changing them.
+  # Not published on any host port; only the bot container can reach it.
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: news-bot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-newsbot}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   bot:
     build: .
     image: news-bot:latest
@@ -16,11 +44,13 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_PATH: /app/data/news.db
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       WEB_HOST: 0.0.0.0
       WEB_PORT: "8000"
-    volumes:
-      - bot-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       # Loopback only by default, so the admin page isn't exposed over plain HTTP.
       # Reach it through an SSH tunnel, the Caddy service below, or set ADMIN_BIND=0.0.0.0.
@@ -58,6 +88,6 @@ services:
       - caddy-config:/config
 
 volumes:
-  bot-data:
+  pg-data:
   caddy-data:
   caddy-config:

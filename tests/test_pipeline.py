@@ -34,7 +34,8 @@ def raw(guid: str, title: str, summary: str = "", url: str = "", image: str | No
 
 
 def statuses(user_id: int) -> list[str]:
-    return [r[0] for r in db.conn.execute("SELECT status FROM notifications WHERE user_id = ? ORDER BY id", (user_id,))]
+    return [r["status"] for r in db.execute("SELECT status FROM notifications WHERE user_id = %s ORDER BY id",
+                                            (user_id,))]
 
 
 @pytest.fixture
@@ -81,7 +82,7 @@ def test_end_to_end_scenario(bot_and_api):
     again = collector.process(bleeping, [raw("bc-9", CYBER[0] + " - BleepingComputer", CYBER[1],
                                              url="https://www.bleepingcomputer.com/news/vpn-flaw/")], now_utc())
     assert again["new"] == 1 and again["queued"] == 0
-    assert db.conn.execute("SELECT COUNT(*) FROM articles WHERE story_cluster_id IS NOT NULL").fetchone()[0] == 1
+    assert db._one("SELECT COUNT(*) FROM articles WHERE story_cluster_id IS NOT NULL") == 1
     assert statuses(100) == ["sent"]
 
     # 7-8: drop Cybersecurity, keep Sports: later cyber news isn't delivered.
@@ -121,7 +122,7 @@ def test_same_url_in_two_feeds_adds_category_once(bot_and_api):
     assert collector.process(provider("bbc_world"), [item("w-1")], now_utc())["queued"] == 1  # user 101 (world)
     assert collector.process(provider("bbc_africa"), [item("a-1")], now_utc())["queued"] == 1  # user 100 (africa)
     assert statuses(100) == ["queued"] and statuses(101) == ["queued"]
-    assert db.conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 1
+    assert db._one("SELECT COUNT(*) FROM articles") == 1
 
 
 def test_subscribing_later_does_not_deliver_earlier_articles():
@@ -181,8 +182,8 @@ def test_retry_after_is_respected(bot_and_api):
     api.fail.append(("sendMessage", RetryAfter(30)))
     sender = Sender(bot)
     assert send_all(sender) == ["queued"]
-    row = db.conn.execute("SELECT attempt_count, next_attempt_at FROM notifications").fetchone()
-    assert row[0] == 0 and datetime.fromisoformat(row[1]) > now_utc() + timedelta(seconds=25)
+    row = db.execute("SELECT attempt_count, next_attempt_at FROM notifications").fetchone()
+    assert row["attempt_count"] == 0 and row["next_attempt_at"] > now_utc() + timedelta(seconds=25)
     assert db.due_notifications() == []
 
 
@@ -194,9 +195,8 @@ def test_temporary_errors_retry_then_give_up(bot_and_api):
     api.fail.append(("sendMessage", NetworkError("connection reset")))
     assert send_all(sender) == ["queued"]
     assert db.due_notifications() == []  # backoff: not due yet
-    db.conn.execute("UPDATE notifications SET next_attempt_at = ?, attempt_count = ?",
-                    (now_utc().isoformat(), config.MAX_SEND_ATTEMPTS - 1))
-    db.conn.commit()
+    db.execute("UPDATE notifications SET next_attempt_at = %s, attempt_count = %s",
+               (now_utc().isoformat(), config.MAX_SEND_ATTEMPTS - 1))
     api.fail.append(("sendMessage", NetworkError("connection reset")))
     assert send_all(sender) == ["failed"]
     assert len(db.failed_notifications()) == 1
@@ -250,7 +250,7 @@ def test_one_provider_failing_does_not_stop_others():
         async def fetch(self, p):
             raise RuntimeError("feed is down")
 
-    db.conn.execute("UPDATE providers SET is_enabled = 0")
+    db.execute("UPDATE providers SET is_enabled = FALSE")
     db.seed([], [{"key": "t_ok", "name": "OK", "base_url": "https://ok.example.com", "feed_url": "https://ok.example.com/rss",
                   "adapter": "ok", "enabled": True, "categories": {"world": 0.9}},
                  {"key": "t_boom", "name": "Boom", "base_url": "https://b.example.com", "feed_url": "https://b.example.com/rss",
@@ -267,7 +267,28 @@ def test_one_provider_failing_does_not_stop_others():
 
 def test_preferences_survive_a_restart():
     make_user(100, ["cybersecurity", "sports"], delivery_mode="digest")
-    reopened = Database(config.DATABASE_PATH)  # a new connection, as after a restart
+    reopened = Database()  # a new connection, as after a restart
     assert reopened.get_user(100).delivery_mode == "digest"
     assert len(reopened.interests(100)) == 2
-    reopened.conn.close()
+    reopened.close()
+
+
+def test_backup_zip_has_every_table():
+    import io
+    import zipfile
+
+    import backup
+    make_user(100, ["sports"])
+    data, name, counts = backup.make_backup()
+    names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+    assert set(names) == {f"{t}.csv" for t in db.BACKUP_TABLES} | {"README.txt"}
+    assert counts["users"] == 1 and name.endswith(".zip")
+    users_csv = zipfile.ZipFile(io.BytesIO(data)).read("users.csv").decode()
+    assert users_csv.startswith("telegram_id,") and "User100" in users_csv
+
+
+def test_reconnects_after_the_database_drops_the_connection():
+    other = Database()
+    other.execute("SELECT pg_terminate_backend(%s)", (db.conn.info.backend_pid,))
+    other.close()
+    assert db.ping()  # reconnected on its own

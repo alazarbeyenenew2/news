@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
         await tg_app.updater.stop()
         await tg_app.stop()
         await tg_app.shutdown()
-        db.conn.close()
+        db.close()
         log.info("Stopped")
 
 

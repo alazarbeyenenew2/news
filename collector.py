@@ -7,7 +7,6 @@ API, say) can be added without touching the processing below. Only RSS/Atom is b
 import asyncio
 import logging
 import random
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable, Protocol
@@ -192,9 +191,8 @@ class Collector:
         # 3. Near-identical headline from another provider: a new article in the same story cluster.
         cluster = find_similar(article["normalized_title"], recent, config.DEDUP_TITLE_SIMILARITY)
         article["story_cluster_id"] = cluster
-        try:
-            article_id = db.insert_article(provider.id, article)
-        except sqlite3.IntegrityError:
+        article_id = db.insert_article(provider.id, article)
+        if article_id is None:  # stored meanwhile (same id or URL)
             return "duplicate", 0
         recent.insert(0, (article_id, article["normalized_title"], article["title_hash"], cluster or article_id))
         if cluster:

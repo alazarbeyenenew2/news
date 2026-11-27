@@ -15,12 +15,11 @@ COPY templates ./templates
 COPY migrations ./migrations
 COPY seed ./seed
 
-# Run as an unprivileged user; the SQLite database lives in /app/data (a volume).
-RUN useradd --create-home --uid 1000 app && mkdir -p /app/data && chown app:app /app/data
+# Run as an unprivileged user. Data lives in the postgres service (see docker-compose.yml).
+RUN useradd --create-home --uid 1000 app
 USER app
 
-ENV DATABASE_PATH=/app/data/news.db \
-    WEB_HOST=0.0.0.0 \
+ENV WEB_HOST=0.0.0.0 \
     WEB_PORT=8000
 
 EXPOSE 8000

@@ -1,4 +1,8 @@
-"""Test setup: a throwaway database file and a fake Telegram Bot API.
+"""Test setup: a PostgreSQL test database and a fake Telegram Bot API.
+
+The tests need a PostgreSQL server. They use POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER /
+POSTGRES_PASSWORD / POSTGRES_DB from the environment (defaults: localhost:5432, newsbot / newsbot,
+database newsbot_test). Every table is emptied before each test, so never point them at real data.
 
 Environment variables are set before any project module is imported, because config.py and db.py read
 them at import time.
@@ -6,12 +10,14 @@ them at import time.
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 
-_tmp = tempfile.mkdtemp(prefix="newsbot-test-")
+for key, default in {"POSTGRES_HOST": "localhost", "POSTGRES_PORT": "5432", "POSTGRES_USER": "newsbot",
+                     "POSTGRES_PASSWORD": "newsbot", "POSTGRES_DB": "newsbot_test"}.items():
+    os.environ.setdefault(key, default)
+if not os.environ["POSTGRES_DB"].endswith("test"):
+    raise RuntimeError("Tests empty every table: POSTGRES_DB must be a test database (name ending in 'test').")
 os.environ.update({
-    "DATABASE_PATH": os.path.join(_tmp, "test.db"),
     "BOT_TOKEN": "123456:TEST-TOKEN",
     "SUPER_ADMIN_IDS": "999",
     "TIMEZONE": "UTC",
@@ -35,10 +41,7 @@ TABLES = ["notifications", "article_categories", "articles", "user_interests", "
 @pytest.fixture(autouse=True)
 def fresh_db():
     """Every test starts with an empty database plus the seed topics and providers."""
-    for table in TABLES:
-        db.conn.execute(f"DELETE FROM {table}")
-    db.conn.execute("DELETE FROM sqlite_sequence")
-    db.conn.commit()
+    db.execute(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE")
     db.seed(*load_seed())
     yield db
 

@@ -2,7 +2,7 @@
 
 A Telegram bot that sends people news alerts for the topics they choose (Cybersecurity, Technology, Sports, War & Conflict, Politics, Business & Finance, Ethiopia, Africa, World, Science, Health, Entertainment). It reads news providers' official RSS/Atom feeds every few minutes, works out which topics each new story belongs to, drops duplicates, and alerts the people who follow those topics. Each alert has the headline, the feed's image (when it has one), a short description, the source, the publication time and a **📖 Read full article** button that opens the publisher's page. Full articles are never copied.
 
-It's built the same way as the report bot: Python, [python-telegram-bot](https://python-telegram-bot.org), SQLite, a small web admin page, Amharic and English texts, super admins from the environment, one Docker container deployed by GitHub Actions.
+It's built the same way as the report bot: Python, [python-telegram-bot](https://python-telegram-bot.org), a small web admin page, Amharic and English texts, super admins from the environment, Docker Compose deployed by GitHub Actions. Data is in PostgreSQL, whose user name and password come from GitHub secrets.
 
 ## Features
 
@@ -38,7 +38,7 @@ Topic choices are only used to pick alerts. They aren't used to guess anyone's v
 
 **Admins** in Telegram (**🛠 Admin** / `/admin`): today's numbers (users, sources, articles, duplicates, articles waiting for review, queue size and age, sent / failed / skipped); **📡 Sources** (turn a provider on or off, see its last success and error, **⬇️ Fetch now**); **🗂 Topics** (turn a topic off for everyone); **⚠️ Failed alerts** with **🔁 Retry all**. Admins are the `SUPER_ADMIN_IDS` plus anyone made admin on the web page.
 
-**Super admins** also get `/backup`: a zip (database copy, `users.csv`, `providers.csv`) sent to every super admin at 00:00 `TIMEZONE` each night (can be turned off), plus **📦 Back up now**.
+**Super admins** also get `/backup`: a zip with one CSV per table (`users.csv`, `providers.csv`… open in Excel; all of them restore with `COPY`) sent to every super admin at 00:00 `TIMEZONE` each night (can be turned off), plus **📦 Back up now**.
 
 **Web admin page** (`http://<server>:8000`, login `ADMIN_USERNAME` / `ADMIN_PASSWORD`):
 - **Overview**: the numbers above, every provider with its state, topics and confidences, interval, last success, last error and article count. Enable / disable, fetch now, edit the interval, topics and notes, and **add a provider** (added disabled).
@@ -92,8 +92,11 @@ Only official RSS/Atom feeds that publishers offer for syndication are used. The
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env   # then edit .env (local development only)
+docker run -d --name news-pg -p 127.0.0.1:5432:5432 -e POSTGRES_USER=newsbot -e POSTGRES_PASSWORD=<the POSTGRES_PASSWORD in .env> -e POSTGRES_DB=newsbot postgres:16.4-alpine
 .venv/bin/python main.py
 ```
+
+(Or run everything with `docker compose up -d --build`, which starts PostgreSQL too.) The bot waits for the database, creates the tables (`migrations/`) and fills in the topics and providers on first start.
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and put its token in `BOT_TOKEN`.
 2. Put your Telegram ID in `SUPER_ADMIN_IDS` (from @userinfobot).
@@ -101,11 +104,11 @@ cp .env.example .env   # then edit .env (local development only)
 4. Run `main.py`. It starts the bot (long polling), the collector, the sender, digests, backups and the admin page in one process.
 5. Send `/start` to the bot. The first fetch of each provider only stores articles; alerts start with stories found after that.
 
-Tests: `.venv/bin/python -m pytest -q`. They cover normalization, URL handling, SSRF checks, duplicates, categorization, the full collect → match → send path (photo fallback, `retry_after`, retries, blocked users, digests, daily limits, muted topics), the Telegram handlers (driven through python-telegram-bot with a fake Bot API), and the admin page.
+Tests: `.venv/bin/python -m pytest -q`. They need a PostgreSQL **test** database (`POSTGRES_DB` must end in `test`; every table is emptied between tests), for example `docker run -d -p 127.0.0.1:5433:5432 -e POSTGRES_USER=newsbot -e POSTGRES_PASSWORD=newsbot -e POSTGRES_DB=newsbot_test postgres:16.4-alpine` and `POSTGRES_PORT=5433`. They cover normalization, URL handling, SSRF checks, duplicates, categorization, the full collect → match → send path (photo fallback, `retry_after`, retries, blocked users, digests, daily limits, muted topics), the Telegram handlers (driven through python-telegram-bot with a fake Bot API), and the admin page.
 
 ## Deploy with GitHub Actions
 
-Same as the report bot: all production configuration lives in GitHub (**Settings → Secrets and variables → Actions**) and nothing is edited on the server. [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs on every push to `main` (or *Actions → Deploy → Run workflow*). It compiles, runs the tests, builds the image and validates the compose file; then over SSH it copies the code, writes `.env`, backs up the database to `backups/` (keeps 14), runs `docker compose up -d --build`, and waits for `/ready`.
+Same as the report bot: all production configuration lives in GitHub (**Settings → Secrets and variables → Actions**) and nothing is edited on the server. [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs on every push to `main` (or *Actions → Deploy → Run workflow*). It compiles, runs the tests, builds the image and validates the compose file; then over SSH it copies the code, writes `.env`, backs up the database with `pg_dump` to `backups/` (keeps 14), starts PostgreSQL and sets its password from the secret, runs `docker compose up -d --build`, and waits for `/ready`.
 
 **Prepare the server and deploy key**: exactly as for the report bot (Docker + compose plugin + rsync, an `ed25519` deploy key, `ssh-keyscan` output for `DEPLOY_KNOWN_HOSTS`).
 
@@ -115,12 +118,15 @@ Same as the report bot: all production configuration lives in GitHub (**Settings
 | `BOT_TOKEN` | token from @BotFather (a different bot from the report bot) |
 | `ADMIN_PASSWORD` | web admin page password |
 | `SECRET_KEY` | `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `POSTGRES_USER` | database user name, e.g. `newsbot` (lowercase letters, digits, `_`) |
+| `POSTGRES_PASSWORD` | database password: `python3 -c "import secrets; print(secrets.token_urlsafe(24))"` (no `'` or line breaks) |
 
 | Variable | Default | Value |
 | --- | --- | --- |
 | `SUPER_ADMIN_IDS` | (required) | your Telegram user ID(s), comma separated |
 | `BOT_NAME` | `NewsPulse` | name used in the bot's messages |
 | `ADMIN_USERNAME` | `admin` | web admin page username |
+| `POSTGRES_DB` | `newsbot` | database name |
 | `TIMEZONE` | `Africa/Addis_Ababa` | times shown to users, digest hours, "today" |
 | `CLASSIFY_MIN_CONFIDENCE` | `0.6` | how sure the classifier must be |
 | `MAX_ARTICLE_AGE_HOURS` | `12` | older stories are never alerted |
@@ -130,6 +136,8 @@ Same as the report bot: all production configuration lives in GitHub (**Settings
 | `DOMAIN` | (none) | serve the admin page at `https://DOMAIN` through Caddy |
 | `ADMIN_BIND` / `ADMIN_PORT` | `127.0.0.1` / `8000` | where the plain-HTTP admin page listens |
 | `DEPLOY_PORT` / `DEPLOY_PATH` | `22` / `news-bot` | SSH port, folder in the SSH user's home |
+
+**About the database secrets.** PostgreSQL runs in its own container (`news-bot-postgres`) with its data in the `pg-data` volume, and isn't published on any port: only the bot container reaches it. It's created with `POSTGRES_USER` / `POSTGRES_PASSWORD` on the first deploy. Changing `POSTGRES_PASSWORD` later is fine: every deploy sets the database password to the secret before starting the bot. Don't change `POSTGRES_USER` or `POSTGRES_DB` after the first deploy (the existing database keeps the old ones); to move to new ones, restore a backup into a fresh volume.
 
 If it runs on the same server as the report bot, give it a different `ADMIN_PORT` (e.g. `8001`) and `DEPLOY_PATH`. The compose project and container names are already different.
 
@@ -147,8 +155,10 @@ Logs (`docker compose logs -f bot`) record fetches, failures and every admin cha
 |---|---|
 | Logs | `docker compose logs -f bot` |
 | Restart | `docker compose restart bot` (stops gracefully: workers, then Telegram) |
-| Stop | `docker compose down` (data stays in the `bot-data` volume) |
-| Restore a backup | `docker compose stop bot && docker compose cp backups/<file>.db bot:/app/data/news.db && docker compose start bot` |
+| Stop | `docker compose down` (data stays in the `pg-data` volume; `down -v` would delete it) |
+| Back up now | `docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > backups/manual.dump` |
+| Restore a backup | `docker compose stop bot`, then `docker compose exec -T postgres sh -c 'pg_restore --clean --if-exists -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backups/<file>.dump`, then `docker compose start bot` |
+| Database shell | `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'` |
 
 ## Files
 
@@ -160,7 +170,7 @@ Logs (`docker compose logs -f bot`) record fetches, failures and every admin cha
 | `news.py` | Feed parsing, cleaning, canonical URLs, duplicate detection, `RuleClassifier` |
 | `delivery.py` | Alert format, `Sender` (queue, retries, rate limits), `Digester` |
 | `netsafe.py` | Safe fetching: public addresses only, redirects re-checked, size and time limits |
-| `db.py`, `migrations/` | SQLite storage; numbered SQL migrations applied in order |
+| `db.py`, `migrations/` | PostgreSQL storage; numbered SQL migrations applied in order on start |
 | `seed/` | Initial topics (with keywords) and providers |
 | `texts_am.py`, `texts_en.py`, `texts.py` | Every text the bot shows, in Amharic and English |
 | `web.py`, `templates/` | Web admin page, `/health`, `/ready`, `/metrics` |
@@ -170,7 +180,7 @@ Logs (`docker compose logs -f bot`) record fetches, failures and every admin cha
 
 ## Design choices and limits
 
-- **Python, SQLite, one process**, like the report bot, instead of the Go + PostgreSQL in the original plan. The modules keep the same boundaries (bot / collector / classifier / delivery / storage), so the sender or collector can move to its own process later (`COLLECTOR_ENABLED` / `DELIVERY_ENABLED` already turn them off). SQLite with WAL handles thousands of users; if it stops being enough, the SQL in `db.py` is plain and moves to PostgreSQL.
+- **Python and one process** like the report bot (the original plan said Go), with **PostgreSQL** as in the plan. The modules keep the same boundaries (bot / collector / classifier / delivery / storage), so the sender or collector can move to its own process later (`COLLECTOR_ENABLED` / `DELIVERY_ENABLED` already turn them off). The bot uses one connection on its event loop, waits for the database at start and reconnects if PostgreSQL restarts.
 - **Users are keyed by Telegram user ID**, never by username.
 - **Not done yet**: quiet hours, per-user time zones (everyone uses `TIMEZONE`), topic-specific digests and an AI classifier (the interface is there; nothing calls an AI service). Feeds' robots.txt isn't checked automatically; official feeds are meant to be fetched, and providers are reviewed by hand before they're enabled.
 - **Feed fetching** only reaches public IP addresses and re-checks every redirect. A DNS server that answers differently between the check and the connection could slip past; images are fetched by Telegram, not by this server.

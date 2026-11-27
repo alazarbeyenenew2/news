@@ -165,9 +165,8 @@ def create_web_app(lifespan=None) -> FastAPI:
     async def categories_page(request: Request):
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
-        followers = {r[0]: r[1] for r in db.conn.execute(
-            "SELECT category_id, COUNT(*) FROM user_interests WHERE is_enabled = 1 GROUP BY category_id")}
-        return page(request, "categories.html", categories=db.categories(active_only=False), followers=followers)
+        return page(request, "categories.html", categories=db.categories(active_only=False),
+                    followers=db.category_followers())
 
     @app.post("/categories/{category_id}/{action}")
     async def category_action(request: Request, category_id: int, action: str, csrf: str = Form(...),
