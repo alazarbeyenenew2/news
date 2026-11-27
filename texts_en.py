@@ -170,7 +170,10 @@ SET_TOPICS = "🗞 Topics"
 BACK = "⬅️ Back"
 CLOSE = "✖️ Close"
 
-HOUR_PROMPT = f"🕗 <b>When should the daily digest arrive?</b>\n<i>Times are {config.TIMEZONE.key}.</i>"
+HOUR_PROMPT = (f"🕗 <b>When should the daily digest arrive?</b>\n"
+               f"Choose ⚡ Instantly to get each story as soon as it's published.\n"
+               f"<i>Times are {config.TIMEZONE.key}.</i>")
+HOUR_INSTANT = "⚡ Instantly"
 LIMIT_PROMPT = ("🔢 <b>Most alerts per day</b>\nAfter this many, the rest of the day's stories are skipped "
                 "(they're not sent later).")
 NEWS_LANGUAGE_PROMPT = "🗣 <b>Which news languages do you want?</b>"

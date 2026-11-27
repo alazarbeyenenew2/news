@@ -583,3 +583,18 @@ def test_digest_now_sends_held_stories_immediately(chat):
     chat.api.clear()
     chat.tap("dg:now")  # nothing left
     assert texts_en.DIGEST_NOW_EMPTY in chat.api.sent_texts()
+
+
+def test_digest_time_picker_offers_instantly(chat):
+    onboard(chat)
+    api = chat.tap("st:hour")
+    screen = api.last("editMessageText")
+    first = screen["reply_markup"]["inline_keyboard"][0][0]
+    assert "When should the daily digest arrive?" in screen["text"]
+    assert first["callback_data"] == "st:hour:instant" and texts_en.HOUR_INSTANT in first["text"]
+    chat.tap("st:hour:20")  # picking a time turns the digest on
+    assert db.get_user(USER).delivery_mode == "digest" and db.get_user(USER).digest_hour == 20
+    api = chat.tap("st:hour:instant")
+    assert db.get_user(USER).delivery_mode == "instant"
+    first = api.last("editMessageText")["reply_markup"]["inline_keyboard"][0][0]
+    assert first["text"].startswith("✅")  # the picker stays open with ⚡ Instantly ticked

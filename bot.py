@@ -632,15 +632,23 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         user = _set_mode(user, value)
         await query.answer(L.DELIVERY_INSTANT if value == "instant" else L.digest_at(user.digest_hour))
     elif action == "hour":
-        if value is not None and value.isdigit() and int(value) in DIGEST_HOURS:
+        # The digest time picker. "⚡ Instantly" means no digest: alerts as stories arrive.
+        # Picking an hour turns the digest on at that hour.
+        if value == "instant":
+            user = _set_mode(user, "instant")
+            await query.answer(L.DELIVERY_INSTANT)
+        elif value is not None and value.isdigit() and int(value) in DIGEST_HOURS:
             user = db.update_user(user.telegram_id, digest_hour=int(value))
+            user = _set_mode(user, "digest")
             await query.answer(L.digest_at(user.digest_hour))
         else:
             await query.answer()
-            rows = _grid([(_mark(h == user.digest_hour, f"{h:02d}:00"), f"{SETTINGS}hour:{h}")
-                          for h in DIGEST_HOURS])
-            await _show(update, context, L.HOUR_PROMPT, InlineKeyboardMarkup(rows + [back]))
-            return
+        instant = user.delivery_mode == "instant"
+        rows = [[InlineKeyboardButton(_mark(instant, L.HOUR_INSTANT), callback_data=f"{SETTINGS}hour:instant")]]
+        rows += _grid([(_mark(not instant and h == user.digest_hour, f"{h:02d}:00"), f"{SETTINGS}hour:{h}")
+                       for h in DIGEST_HOURS])
+        await _show(update, context, L.HOUR_PROMPT, InlineKeyboardMarkup(rows + [back]))
+        return
     elif action == "limit":
         if value is not None and value.isdigit() and int(value) in DAILY_LIMITS:
             user = db.update_user(user.telegram_id, max_per_day=int(value))

@@ -169,7 +169,10 @@ SET_TOPICS = "🗞 ርዕሶች"
 BACK = "⬅️ ተመለስ"
 CLOSE = "✖️ ዝጋ"
 
-HOUR_PROMPT = f"🕗 <b>ዕለታዊ ማጠቃለያው መቼ ይድረስዎ?</b>\n<i>ሰዓቶቹ በ{config.TIMEZONE.key} ናቸው።</i>"
+HOUR_PROMPT = (f"🕗 <b>ዕለታዊ ማጠቃለያው መቼ ይድረስዎ?</b>\n"
+               f"እያንዳንዱን ዜና እንደወጣ ለማግኘት ⚡ ወዲያውኑ የሚለውን ይምረጡ።\n"
+               f"<i>ሰዓቶቹ በ{config.TIMEZONE.key} ናቸው።</i>")
+HOUR_INSTANT = "⚡ ወዲያውኑ"
 LIMIT_PROMPT = ("🔢 <b>በቀን ከፍተኛው የማሳወቂያ ብዛት</b>\nከዚህ በኋላ የቀኑ ቀሪ ዜናዎች ይዘለላሉ "
                 "(በኋላ አይላኩም)።")
 NEWS_LANGUAGE_PROMPT = "🗣 <b>በየትኛው ቋንቋ ዜና ይፈልጋሉ?</b>"
