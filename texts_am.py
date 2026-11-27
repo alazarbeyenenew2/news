@@ -90,6 +90,15 @@ def onboarding_done(topics: str, instant: bool, hour: int) -> str:
             "ማንኛውንም ለመቀየር ከታች ያሉትን ቁልፎች ይጠቀሙ።")
 
 
+def auto_saved(topics: str, instant: bool, hour: int) -> str:
+    how = "⚡ ወዲያውኑ" if instant else f"📰 በየቀኑ {hour:02d}:00 ላይ በማጠቃለያ"
+    return (f"✅ <b>ምርጫዎችዎ ተቀምጠዋል።</b>\n{LINE}\n"
+            f"ርዕሶች፦ {topics}\nዜና {how} ይደርስዎታል።\n\n"
+            "ማንኛውንም ከታች ባሉት ቁልፎች ይቀይሩ፦ 🗞 የኔ ርዕሶች፣ 📚 ምንጮች፣ ⚙️ ቅንብሮች።")
+
+
+WELCOME_NEWS_INTRO = "📰 <b>የዛሬ ዜናዎች እስካሁን</b> ለርዕሶችዎ፦"
+
 ONBOARDING_SKIPPED = (f"👌 እስካሁን ርዕስ አልመረጡም።\n{LINE}\n"
                       "ርዕስ እስኪመርጡ ማሳወቂያ አይደርስዎትም። ዝግጁ ሲሆኑ <b>🗞 የኔ ርዕሶች</b>ን ይንኩ "
                       "(ወይም /interests ይላኩ)።")

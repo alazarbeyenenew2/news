@@ -285,7 +285,9 @@ def create_web_app(lifespan=None) -> FastAPI:
     async def users_page(request: Request, q: str = ""):
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
-        return page(request, "users.html", rows=db.list_users(q), q=q)
+        rows = db.list_users(q)
+        prefs = db.user_preferences([r["user"].telegram_id for r in rows])
+        return page(request, "users.html", rows=rows, q=q, prefs=prefs)
 
     @app.post("/users/{telegram_id}/{action}")
     async def user_action(request: Request, telegram_id: int, action: str, csrf: str = Form(...),

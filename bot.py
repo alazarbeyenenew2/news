@@ -10,7 +10,7 @@ import html
 import io
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from telegram import (
     BotCommand,
@@ -359,6 +359,8 @@ async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             else L.ONBOARDING_SKIPPED)
     await _show(update, context, text, None)
     await _send(context, update.effective_chat.id, L.MENU_HINT, main_keyboard(user))
+    if db.interests(user.telegram_id):
+        await send_welcome_news(context.bot, user)
 
 
 async def _show_delivery_step(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
@@ -509,6 +511,7 @@ async def onboarding_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE
     await _send(context, update.effective_chat.id,
                 L.onboarding_done(_topic_names(user), mode == "instant", user.digest_hour), main_keyboard(user))
     log.info("User %s finished onboarding (%s)", user.telegram_id, mode)
+    await send_welcome_news(context.bot, user)
 
 
 # ---------- pause / resume ----------
@@ -765,27 +768,101 @@ async def pull_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not items:
             await _send(context, chat_id, L.PULL_NOTHING, main_keyboard(user))
             return
-        providers = {p.id: p.name for p in db.providers()}
-        categories = {c.id: c for c in db.categories()}
-        sent = 0
-        for article, category_id in items:
-            if not db.claim_pulled(user.telegram_id, article, category_id):
-                continue  # already received meanwhile
-            try:
-                await _retry(lambda: send_alert(context.bot, user, article, providers.get(article.provider_id, ""),
-                                                categories.get(category_id)))
-                sent += 1
-            except TelegramError as e:
-                db.unclaim_pulled(user.telegram_id, article, str(e))
-                log.warning("Pulled article %s to %s failed: %s", article.id, user.telegram_id, e)
-            await asyncio.sleep(0.3)  # keep a short burst gentle
-        metrics.inc("news_pulled", sent)
-        log.info("User %s pulled %s stories (%s more waiting)", user.telegram_id, sent, total - len(items))
+        sent = await _deliver_today(context.bot, user, items)
         remaining = total - len(items)
+        log.info("User %s pulled %s stories (%s more waiting)", user.telegram_id, sent, remaining)
         more = InlineKeyboardMarkup([[_button(L.pull_more(remaining), PULL_MORE)]]) if remaining else None
         await _send(context, chat_id, L.pull_done(sent, remaining), more or main_keyboard(user))
     finally:
         context.user_data.pop("pulling", None)
+
+
+async def _deliver_today(bot, user: User, items: list) -> int:
+    """Send today's stories (from db.pull_candidates) to a user, each claimed first so nothing is sent
+    twice; a failed one can be tried again later. Returns how many were sent."""
+    providers = {p.id: p.name for p in db.providers()}
+    categories = {c.id: c for c in db.categories()}
+    sent = 0
+    for article, category_id in items:
+        if not db.claim_pulled(user.telegram_id, article, category_id):
+            continue  # already received meanwhile
+        try:
+            await _retry(lambda: send_alert(bot, user, article, providers.get(article.provider_id, ""),
+                                            categories.get(category_id)))
+            sent += 1
+        except TelegramError as e:
+            db.unclaim_pulled(user.telegram_id, article, str(e))
+            log.warning("Today's article %s to %s failed: %s", article.id, user.telegram_id, e)
+        await asyncio.sleep(0.3)  # keep a short burst gentle
+    metrics.inc("news_pulled", sent)
+    return sent
+
+
+async def send_welcome_news(bot, user: User) -> int:
+    """Once per user, when onboarding is done (finished or auto-saved): today's stories for their topics
+    that they haven't received yet, PULL_PAGE of them, with 📥 Show more if there are others.
+    Returns how many were sent."""
+    if user.welcome_news_at:
+        return 0
+    db.update_user(user.telegram_id, welcome_news_at=now_utc().isoformat())
+    L = tr(user)
+    items, total = db.pull_candidates(user, day_start_utc(local_today()), PULL_PAGE)
+    if not items:
+        return 0
+    try:
+        await bot.send_message(user.chat_id, L.WELCOME_NEWS_INTRO, parse_mode=ParseMode.HTML)
+    except TelegramError as e:
+        log.warning("Welcome news to %s failed: %s", user.telegram_id, e)
+        return 0
+    sent = await _deliver_today(bot, user, items)
+    remaining = total - len(items)
+    more = InlineKeyboardMarkup([[_button(L.pull_more(remaining), PULL_MORE)]]) if remaining else main_keyboard(user)
+    try:
+        await bot.send_message(user.chat_id, L.pull_done(sent, remaining), parse_mode=ParseMode.HTML,
+                               reply_markup=more)
+    except TelegramError:
+        pass
+    log.info("Sent %s of today's stories to %s after onboarding", sent, user.telegram_id)
+    return sent
+
+
+class OnboardingAutosave:
+    """Every minute: people who chose topics (or CVE reports) during onboarding but never tapped
+    ➡️ Next / Done get their choices saved after ONBOARDING_AUTOSAVE_MINUTES without a tap. Their
+    remaining steps take the defaults (every source on, instant alerts); they're told so, get the main
+    keyboard, and get today's news they haven't received."""
+
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def run_forever(self) -> None:
+        while True:
+            try:
+                await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Onboarding auto-save failed")
+            await asyncio.sleep(60)
+
+    async def run_once(self, now: datetime | None = None) -> int:
+        now = now or now_utc()
+        idle_since = (now - timedelta(minutes=config.ONBOARDING_AUTOSAVE_MINUTES)).isoformat()
+        done = 0
+        for user in db.onboarding_idle_users(idle_since):
+            user = db.update_user(user.telegram_id, onboarding_completed=True)
+            L = tr(user)
+            try:
+                await self.bot.send_message(user.chat_id, L.auto_saved(_topic_names(user), user.delivery_mode == "instant",
+                                                                        user.digest_hour),
+                                            parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user))
+            except TelegramError as e:
+                log.warning("Auto-save message to %s failed: %s", user.telegram_id, e)
+                continue
+            log.info("Auto-saved onboarding for %s after %s min", user.telegram_id, config.ONBOARDING_AUTOSAVE_MINUTES)
+            await send_welcome_news(self.bot, user)
+            done += 1
+        return done
 
 
 async def _refresh_sources(context: ContextTypes.DEFAULT_TYPE, user: User, chat_id: int) -> None:

@@ -75,6 +75,7 @@ class User:
     cve_enabled_at: str | None = None
     cve_all_technologies: bool = False
     cve_min_severity: str = "HIGH"
+    welcome_news_at: str | None = None
 
     @property
     def is_super_admin(self) -> bool:
@@ -377,7 +378,7 @@ class Database:
 
     USER_FIELDS = {"language", "role", "status", "onboarding_completed", "notifications_enabled",
                    "delivery_mode", "digest_hour", "last_digest_date", "max_per_day", "news_language",
-                   "cve_alerts", "cve_enabled_at", "cve_all_technologies", "cve_min_severity"}
+                   "cve_alerts", "cve_enabled_at", "cve_all_technologies", "cve_min_severity", "welcome_news_at"}
 
     def update_user(self, telegram_id: int, **values) -> User:
         unknown = set(values) - self.USER_FIELDS
@@ -407,6 +408,41 @@ class Database:
             """,
             (day_start_utc(local_today()), search, like, like, like)).fetchall()
         return [{"user": _row(User, r), "topics": r["topics"], "sent_today": r["sent_today"]} for r in rows]
+
+    def user_preferences(self, user_ids: list[int]) -> dict[int, dict]:
+        """For the admin page: each user's topics (with mute state), switched-off sources and CVE
+        technologies, in three queries for the whole list."""
+        prefs = {uid: {"topics": [], "sources_off": [], "technologies": []} for uid in user_ids}
+        if not user_ids:
+            return prefs
+        for r in self.execute(
+                """SELECT i.user_id, c.emoji, c.name_en, i.is_enabled FROM user_interests i
+                   JOIN categories c ON c.id = i.category_id WHERE i.user_id = ANY(%s) ORDER BY c.sort_order""",
+                (user_ids,)):
+            prefs[r["user_id"]]["topics"].append({"label": f"{r['emoji']} {r['name_en']}", "muted": not r["is_enabled"]})
+        for r in self.execute(
+                """SELECT x.user_id, p.name FROM user_source_exclusions x JOIN providers p ON p.id = x.provider_id
+                   WHERE x.user_id = ANY(%s) ORDER BY p.name""", (user_ids,)):
+            if r["name"] not in prefs[r["user_id"]]["sources_off"]:
+                prefs[r["user_id"]]["sources_off"].append(r["name"])
+        for r in self.execute(
+                """SELECT ut.user_id, COALESCE(t.name, ut.term) AS name FROM user_technologies ut
+                   LEFT JOIN technologies t ON t.id = ut.technology_id WHERE ut.user_id = ANY(%s)
+                   ORDER BY ut.technology_id NULLS LAST, ut.created_at""", (user_ids,)):
+            prefs[r["user_id"]]["technologies"].append(r["name"])
+        return prefs
+
+    def onboarding_idle_users(self, idle_since: str) -> list[User]:
+        """Users who chose something during onboarding (a topic or CVE reports) but never finished it,
+        and haven't touched the bot since idle_since: their choices count as saved."""
+        rows = self.execute(
+            """SELECT u.* FROM users u
+               WHERE NOT u.onboarding_completed AND u.status = 'active' AND u.language IS NOT NULL
+                 AND u.last_seen_at < %s
+                 AND (u.cve_alerts OR EXISTS (SELECT 1 FROM user_interests i JOIN categories c ON c.id = i.category_id
+                                              WHERE i.user_id = u.telegram_id AND c.is_active))""",
+            (idle_since,)).fetchall()
+        return [_row(User, r) for r in rows]
 
     def admin_ids(self) -> list[int]:
         rows = self.execute("SELECT telegram_id, role FROM users WHERE status = 'active'").fetchall()

@@ -12,7 +12,7 @@ logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", le
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 import config  # noqa: E402
-from bot import build_application, nightly_backup_loop  # noqa: E402
+from bot import OnboardingAutosave, build_application, nightly_backup_loop  # noqa: E402
 from collector import Collector  # noqa: E402
 from db import db, load_seed, load_technologies  # noqa: E402
 from delivery import Digester, Sender  # noqa: E402
@@ -46,7 +46,8 @@ async def lifespan(app: FastAPI):
     app.state.sender = tg_app.bot_data["sender"] = sender
     if config.DELIVERY_ENABLED:
         tasks += [asyncio.create_task(sender.run_forever(), name="sender"),
-                  asyncio.create_task(Digester(tg_app.bot).run_forever(), name="digest")]
+                  asyncio.create_task(Digester(tg_app.bot).run_forever(), name="digest"),
+                  asyncio.create_task(OnboardingAutosave(tg_app.bot).run_forever(), name="autosave")]
     collector = Collector(on_queued=sender.wake)
     app.state.collector = tg_app.bot_data["collector"] = collector
     if config.COLLECTOR_ENABLED:

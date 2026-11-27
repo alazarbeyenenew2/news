@@ -91,6 +91,15 @@ def onboarding_done(topics: str, instant: bool, hour: int) -> str:
             "Use the buttons below to change anything.")
 
 
+def auto_saved(topics: str, instant: bool, hour: int) -> str:
+    how = "⚡ instantly" if instant else f"📰 in a daily digest at {hour:02d}:00"
+    return (f"✅ <b>Your choices are saved.</b>\n{LINE}\n"
+            f"Topics: {topics}\nYou'll get news {how}.\n\n"
+            "Change anything with the buttons below: 🗞 My topics, 📚 Sources, ⚙️ Settings.")
+
+
+WELCOME_NEWS_INTRO = "📰 <b>Today's news so far</b> for your topics:"
+
 ONBOARDING_SKIPPED = (f"👌 No topics yet.\n{LINE}\n"
                       "You won't get alerts until you choose some. Tap <b>🗞 My topics</b> "
                       "(or send /interests) whenever you're ready.")

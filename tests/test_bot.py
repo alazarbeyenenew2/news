@@ -486,3 +486,60 @@ def test_latest_news_checks_the_sources_first(chat):
     fetched.clear()
     chat.send(texts_en.BTN_PULL)
     assert fetched == []  # checked less than a minute ago: not fetched again
+
+
+# ---------- onboarding auto-save and today's news ----------
+def _idle(user_id: int, minutes: int):
+    from datetime import timedelta
+
+    from db import now_utc
+    db.execute("UPDATE users SET last_seen_at = %s WHERE telegram_id = %s",
+               ((now_utc() - timedelta(minutes=minutes)).isoformat(), user_id))
+
+
+def test_finishing_onboarding_sends_todays_news(chat):
+    _stories("bbc_sport", "s", SPORTS[:3])  # found earlier today (first fetch: no alerts)
+    chat.send("/start")
+    chat.tap("lang:en")
+    chat.tap(f"tp:o:{cid('sports')}")
+    chat.tap("tps:o")
+    chat.tap("srx:o")
+    api = chat.tap("ob:instant")
+    texts_sent = [p.get("text") or "" for m, p in api.calls if m == "sendMessage"]
+    assert any("You're all set" in t for t in texts_sent)
+    assert any(texts_en.WELCOME_NEWS_INTRO in t for t in texts_sent)
+    assert len(_alerts(api)) == 3 and set(_statuses().values()) == {"pulled"}
+    assert db.get_user(USER).welcome_news_at is not None
+    # Only once: tapping an old delivery button again sends no second batch.
+    _stories("bbc_sport", "t", ["Late goal seals derby win at the death"])
+    assert _alerts(chat.tap("ob:instant")) == []
+
+
+def test_onboarding_choices_auto_save_after_ten_minutes(chat):
+    from bot import OnboardingAutosave
+    _stories("bbc_sport", "s", SPORTS[:2])
+    chat.send("/start")
+    chat.tap("lang:en")
+    chat.tap(f"tp:o:{cid('sports')}")  # picks a topic, then walks away without ➡️ Next
+    chat.send("/start", user=200)
+    chat.tap("lang:en", user=200)      # picked nothing: stays in onboarding
+    autosave = OnboardingAutosave(chat.app.bot)
+
+    _idle(USER, 5)
+    assert chat.loop.run_until_complete(autosave.run_once()) == 0  # not 10 minutes yet
+    assert not db.get_user(USER).onboarding_completed
+
+    _idle(USER, 11)
+    _idle(200, 30)
+    chat.api.clear()
+    assert chat.loop.run_until_complete(autosave.run_once()) == 1
+    user = db.get_user(USER)
+    assert user.onboarding_completed and user.delivery_mode == "instant"
+    assert set(db.interests(USER)) == {cid("sports")}
+    saved = chat.api.calls[0][1]
+    assert "Your choices are saved" in saved["text"] and "Sports" in saved["text"]
+    assert saved["reply_markup"]["keyboard"][0][0]["text"] == texts_en.BTN_PULL  # the main keyboard
+    assert len(_alerts(chat.api)) == 2  # today's news they hadn't received
+    assert not db.get_user(200).onboarding_completed
+    chat.api.clear()
+    assert chat.loop.run_until_complete(autosave.run_once()) == 0 and _alerts(chat.api) == []  # once

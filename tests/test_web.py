@@ -93,3 +93,20 @@ def test_user_management(client):
     db.upsert_user(999, 999, None, "Super")
     r = client.post("/users/999/disable", data={"csrf": csrf})
     assert "be changed here" in r.text and db.get_user(999).status == "active"
+
+
+def test_users_page_lists_preferences(client):
+    login(client)
+    db.upsert_user(100, 100, "abebe", "Abebe")
+    db.update_user(100, language="am", onboarding_completed=True, delivery_mode="digest", digest_hour=20,
+                   cve_alerts=True, cve_enabled_at=now_utc().isoformat(), cve_min_severity="CRITICAL")
+    sports, health = db.category_by_key("sports").id, db.category_by_key("health").id
+    db.set_interests(100, {sports, health})
+    db.set_interest_enabled(100, health, False)
+    db.set_source_exclusions(100, {next(p.id for p in db.providers() if p.key == "espn_soccer")})
+    db.add_user_technology(100, "nginx")
+    html = client.get("/users").text
+    assert "⚽ Sports" in html and "🩺 Health" in html and "line-through" in html  # muted topic struck out
+    assert "📰 digest 20:00" in html and "news in" not in html
+    assert "1 sources off" in html and "ESPN" in html
+    assert "Critical only" in html and "nginx" in html

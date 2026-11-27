@@ -2,6 +2,7 @@
 {% from "_icons.html" import icon %}
 {% block heading %}Users{% endblock %}
 {% block subheading %}<p>{{ rows | length }} {{ "user" if rows | length == 1 else "users" }}{% if q %} matching “{{ q }}”{% endif %}</p>{% endblock %}
+{% block head %}<style>.prefs { display: flex; flex-direction: column; gap: 5px; } .prefs .chips { display: flex; flex-wrap: wrap; gap: 2px; }</style>{% endblock %}
 {% block content %}
 <div class="card">
   <form class="actions" method="get" action="/users" style="margin-bottom:16px">
@@ -11,7 +12,7 @@
   </form>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>User</th><th>Status</th><th>Alerts</th><th class="num">Topics</th><th class="num">Sent today</th><th>Last seen</th><th></th></tr></thead>
+    <thead><tr><th>User</th><th>Status</th><th>Preferences</th><th class="num">Sent today</th><th>Last seen</th><th></th></tr></thead>
     <tbody>
     {% for row in rows %}{% set u = row.user %}
       <tr>
@@ -22,8 +23,26 @@
             <div class="small muted">{% if u.username %}@{{ u.username }} · {% endif %}{{ u.telegram_id }}</div></div></div></td>
         <td>{% if u.status == "active" %}<span class="badge b-on">active</span>{% elif u.status == "blocked" %}<span class="badge b-warn">blocked the bot</span>{% else %}<span class="badge b-bad">disabled</span>{% endif %}
             {% if not u.onboarding_completed %}<br><span class="badge b-off">onboarding</span>{% endif %}</td>
-        <td class="small" style="white-space:nowrap">{{ "🔔 on" if u.notifications_enabled else "⏸ paused" }} · {{ u.delivery_mode }}{% if u.delivery_mode == "digest" %} {{ "%02d" % u.digest_hour }}:00{% endif %}{% if u.cve_alerts %}<br>🛡 CVE reports{% endif %}</td>
-        <td class="num">{{ row.topics }}</td>
+        {% set p = prefs.get(u.telegram_id, {}) %}
+        <td style="min-width:300px">
+          <div class="prefs">
+            <div class="chips">{% for t in p.topics %}<span class="badge {{ 'b-off' if t.muted else 'b-info' }}" {% if t.muted %}style="text-decoration:line-through" title="muted"{% endif %}>{{ t.label }}</span>{% else %}<span class="muted small">No topics</span>{% endfor %}{% if u.cve_alerts %}<span class="badge b-bad">🛡 CVE reports</span>{% endif %}</div>
+            <div class="small muted">
+              {{ "🔔 alerts on" if u.notifications_enabled else "⏸ paused" }} ·
+              {% if u.delivery_mode == "digest" %}📰 digest {{ "%02d" % u.digest_hour }}:00{% else %}⚡ instant{% endif %} ·
+              {{ "no daily limit" if not u.max_per_day else u.max_per_day ~ "/day" }} ·
+              🌐 {{ u.language or "—" }}{% if u.news_language != "any" %}, news in {{ u.news_language }} only{% endif %}
+            </div>
+            {% if p.sources_off or u.cve_alerts %}
+            <details><summary>{% if p.sources_off %}{{ p.sources_off | length }} sources off{% endif %}{% if p.sources_off and u.cve_alerts %} · {% endif %}{% if u.cve_alerts %}CVE settings{% endif %}</summary>
+              {% if p.sources_off %}<div class="small" style="margin-top:6px"><b>Sources off:</b> {{ p.sources_off | join(", ") }}</div>{% endif %}
+              {% if u.cve_alerts %}<div class="small" style="margin-top:6px"><b>CVE reports:</b>
+                {{ {"CRITICAL": "Critical only", "HIGH": "High and above", "MEDIUM": "Medium and above", "ALL": "All severities"}[u.cve_min_severity] }} ·
+                {% if u.cve_all_technologies %}all technologies{% elif p.technologies %}{{ p.technologies | join(", ") }}{% else %}no technologies yet{% endif %}</div>{% endif %}
+            </details>
+            {% endif %}
+          </div>
+        </td>
         <td class="num">{{ row.sent_today }}</td>
         <td class="small muted" style="white-space:nowrap" title="{{ u.last_seen_at | local }}">{{ u.last_seen_at | ago }}</td>
         <td>
@@ -42,7 +61,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="muted" style="text-align:center;padding:30px">No users yet. Users appear here after they send /start to the bot.</td></tr>
+      <tr><td colspan="6" class="muted" style="text-align:center;padding:30px">No users yet. Users appear here after they send /start to the bot.</td></tr>
     {% endfor %}
     </tbody>
   </table>
