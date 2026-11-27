@@ -156,3 +156,17 @@ def test_reason_is_recorded():
     reasons = {r[0]: r[3] for r in results}
     cyber = db.category_by_key("cybersecurity").id
     assert "title 'ransomware'" in reasons[cyber]
+
+
+@pytest.mark.parametrize("title,is_war", [
+    ("Israeli strikes kill 16 schoolchildren so far this month, Gaza ministry says", True),
+    ("Saudi strike kills '11 civilians' in Yemen's Taiz", True),
+    ("Ukrainians search for missing after Russian strikes", True),
+    ("Doctors describe attacks on hospitals by Rapid Support Forces", True),
+    ("Thirty-one killed in massive fire as fuel tanker crashes on Cairo highway", False),
+    ("Amazon staff to strike and rally on busiest weekend", False),
+    ("Bus drivers strike over pay in London", False),
+    ("Spain's election: what you need to know", False),
+])
+def test_conflict_keywords(title, is_war):
+    assert ("war_conflict" in _confident(_classify(title))) is is_war

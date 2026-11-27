@@ -47,7 +47,17 @@
         "troops": 0.5, "military": 0.4, "armed group": 0.7, "armed groups": 0.7, "rebels": 0.6, "rebel": 0.6,
         "militia": 0.6, "militias": 0.6, "insurgents": 0.7, "insurgency": 0.7, "invasion": 0.6, "missile": 0.6,
         "missiles": 0.6, "frontline": 0.6, "front line": 0.6, "fighting": 0.4, "clashes": 0.6, "army": 0.4,
-        "fano": 0.6, "hostages": 0.6, "conflict": 0.5, "ጦርነት": 0.9, "ግጭት": 0.8
+        "fano": 0.6, "hostages": 0.6, "conflict": 0.5, "ጦርነት": 0.9, "ግጭት": 0.8, "israeli strike": 0.8,
+        "israeli strikes": 0.8, "russian strike": 0.8, "russian strikes": 0.8, "ukrainian strike": 0.8,
+        "ukrainian strikes": 0.8, "strike kills": 0.8, "strikes kill": 0.8, "killed in strike": 0.8,
+        "killed in strikes": 0.8, "missile strike": 0.8, "missile strikes": 0.8, "gaza": 0.5, "west bank": 0.5,
+        "hamas": 0.6, "hezbollah": 0.6, "houthi": 0.6, "houthis": 0.6, "idf": 0.6, "rapid support forces": 0.9,
+        "paramilitary": 0.7, "al-shabaab": 0.8, "jihadist": 0.7, "jihadists": 0.7, "war in ukraine": 0.8,
+        "russia's war": 0.8, "ukraine": 0.4, "drone": 0.5, "drones": 0.5, "bombing": 0.7, "bombings": 0.7,
+        "bombardment": 0.8, "warplanes": 0.8, "artillery": 0.8, "offensive": 0.5, "soldiers": 0.5, "war crimes": 0.8,
+        "genocide": 0.6, "atrocities": 0.6, "massacre": 0.8, "hostilities": 0.8, "peacekeepers": 0.7,
+        "peacekeeping": 0.7, "landmine": 0.7, "landmines": 0.7, "attack": 0.3, "attacks": 0.3, "killed": 0.3,
+        "violence": 0.3
       }
     },
     {

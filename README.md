@@ -61,7 +61,7 @@ providers (RSS/Atom) → adapter → validate & normalize → deduplicate → ca
 2. **Adapters** turn a provider's response into `RawArticle`s. RSS and Atom are built in; another kind of source (an official API) is a new class with one `fetch(provider)` method, registered in `ADAPTERS`, and a provider row with that `adapter_key`.
 3. **Validation** ([`news.py`](news.py)): a title and a safe http(s) link are required; HTML is removed; URLs are made canonical (tracking parameters, fragments, default ports dropped); future dates are dropped; the summary is the provider's own description, cut to about four sentences.
 4. **Duplicates**: same item id from the same feed → skipped. Same canonical URL from another feed → the existing article also gets that feed's topics (so a BBC story in both *World* and *Africa* reaches both audiences once). Near-identical headline within `DEDUP_WINDOW_HOURS` → stored as part of the same **story cluster**. Short or merely similar headlines aren't merged. Each person gets at most one alert per story cluster, enforced by a unique index, so retries can't double-send.
-5. **Topics** come from three kinds of evidence, combined (1 − Π(1 − evidence)): the provider's default topics (e.g. BBC Sport → Sports 0.95), keywords in the headline (full weight), in the summary (60%) and in the provider's tags (80%). An article counts for a topic at `CLASSIFY_MIN_CONFIDENCE` (0.6) or more, so one weak word ("patch" in the summary: 0.18) isn't enough. Each result keeps its reason for the admin page. Amharic keywords match inside words (ኢትዮጵያ matches በኢትዮጵያ). Articles with no confident topic aren't sent; they wait on **Articles → no confident topic** for an admin. `RuleClassifier` sits behind a `Classifier` interface so an AI classifier can be added later.
+5. **Topics** come from three kinds of evidence, combined (1 − Π(1 − evidence)): the provider's default topics (e.g. BBC Sport → Sports 0.95), keywords in the headline (full weight), in the summary (60%) and in the provider's tags (80%). An article counts for a topic at `CLASSIFY_MIN_CONFIDENCE` (0.6) or more, so one weak word ("patch" in the summary: 0.18) isn't enough. Each result keeps its reason for the admin page. Amharic keywords match inside words (ኢትዮጵያ matches በኢትዮጵያ). War & Conflict uses specific phrases ("Israeli strikes", "strike kills", "Rapid Support Forces", "war crimes"…) rather than the bare word "strike", so labour strikes, fires and crashes aren't tagged as war; general words like "killed" or "attack" only count a little. Articles with no confident topic aren't sent; they wait on **Articles → no confident topic** for an admin. `RuleClassifier` sits behind a `Classifier` interface so an AI classifier can be added later.
 6. **Matching** queues one notification per person who is active, not paused, onboarded, follows (and hasn't muted) one of the article's confident topics since before it was found, hasn't turned its source off, reads its language, and is under their daily limit.
 7. **Sender** ([`delivery.py`](delivery.py)) sends queued alerts at up to `MESSAGES_PER_SECOND`, re-checking each person first. Telegram's `retry_after` pauses sending; network errors retry with backoff (30 s, 1 min, 2 min…) up to `MAX_SEND_ATTEMPTS`; permanent errors are marked failed; "bot was blocked" marks the person blocked and drops their queue.
 
@@ -88,7 +88,19 @@ Only official RSS/Atom feeds that publishers offer for syndication are used. The
 | Capital Ethiopia, Addis Fortune | site feeds (business weeklies) | Ethiopia, Business 0.5 | on |
 | allAfrica | Ethiopia headlines (aggregates many Ethiopian publishers) | Ethiopia | on; check allAfrica's terms for commercial use |
 | ሪፖርተር (The Reporter, Amharic) | site feed | Ethiopia | off: feed hadn't updated since 1 Nov |
-| Krebs on Security, Ars Technica, ESPN | | Cybersecurity / Technology / Sports | off (choose to enable) |
+| BBC News | Middle East, Europe | World (conflict via keywords) | on |
+| The Guardian | Ukraine, Middle East | World, War & Conflict 0.4 | on; feeds are for non-commercial use with attribution |
+| UN News | Peace and security | World, War & Conflict 0.4 | on |
+| The Kyiv Independent | site feed | World, War & Conflict 0.4 | on |
+| International Crisis Group | conflict analysis | War & Conflict | on |
+| France 24 | World, Africa, Sport | World / Africa / Sports | on |
+| DW | World | World | on |
+| BBC Sport | Football, Athletics, Tennis, Formula 1, Basketball | Sports | on (one switch with the main BBC Sport feed) |
+| The Guardian | Sport, Football | Sports | on; non-commercial use with attribution |
+| Sky Sports | News, Football | Sports | on |
+| ESPN | Soccer | Sports | on |
+| Soccer Ethiopia | Ethiopian football, Amharic | Sports, Ethiopia 0.5 | on |
+| Krebs on Security, Ars Technica, ESPN (main) | | Cybersecurity / Technology / Sports | off (choose to enable) |
 | Addis Standard, Walta, Addis Zeybe | site feeds | Ethiopia | **off: Cloudflare blocks automated clients**; left off, not worked around |
 
 **Before running this as a public or commercial service**, read each publisher's terms for their feeds and keep a note in the provider's **Notes** field. Some feeds are offered for personal, non-commercial use or ask for specific attribution. If the terms are unclear, turn the provider off.

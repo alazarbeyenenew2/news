@@ -61,3 +61,18 @@ def test_migrates_a_brand_new_database():
     finally:
         db.execute("SET search_path TO public")
         db.execute("DROP SCHEMA migration_scratch CASCADE")
+
+
+def test_conflict_keyword_migration_keeps_admin_changes():
+    """Migration 006 adds War & Conflict keywords but never overwrites a weight an admin set."""
+    sql = (MIGRATIONS_DIR / "006_more_conflict_keywords.sql").read_text()
+    war = db.category_by_key("war_conflict")
+    original = war.keywords
+    try:
+        db.set_category_keywords(war.id, {"war": 0.6, "gaza": 0.1})  # an admin turned "gaza" down
+        db.execute(sql)
+        keywords = db.get_category(war.id).keywords
+        assert keywords["gaza"] == 0.1 and keywords["war"] == 0.6   # kept
+        assert keywords["rapid support forces"] == 0.9 and keywords["israeli strikes"] == 0.8  # added
+    finally:
+        db.set_category_keywords(war.id, original)
