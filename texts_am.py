@@ -16,6 +16,7 @@ BTN_RESUME = "▶️ ማሳወቂያ ቀጥል"
 BTN_DIGEST = "📰 ዕለታዊ ማጠቃለያ"
 BTN_SOURCES = "📚 ምንጮች"
 BTN_HELP = "❓ እገዛ"
+BTN_CONTACT = "💬 ያግኙን"
 BTN_ADMIN = "🛠 አስተዳደር"
 KEYBOARD_PLACEHOLDER = "ከምናሌው ይምረጡ…"
 

@@ -224,7 +224,11 @@ def test_sources_and_help(chat):
 
 def test_support_contact_is_clickable(chat):
     onboard(chat)
-    for message in (chat.send("/help").last("sendMessage"), chat.send("/support").last("sendMessage")):
+    from bot import main_keyboard
+    rows = [[b.text for b in row] for row in main_keyboard(db.get_user(USER)).keyboard]
+    assert ["❓ Help", "💬 Contact us"] in rows
+    for message in (chat.send("/help").last("sendMessage"), chat.send("/support").last("sendMessage"),
+                    chat.send("💬 Contact us").last("sendMessage")):
         assert '<a href="https://t.me/alazarbeyene">@alazarbeyene</a>' in message["text"]
         button = message["reply_markup"]["inline_keyboard"][0][0]
         assert button["url"] == "https://t.me/alazarbeyene" and "support" in button["text"].lower()

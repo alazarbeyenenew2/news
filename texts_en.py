@@ -17,6 +17,7 @@ BTN_RESUME = "▶️ Resume alerts"
 BTN_DIGEST = "📰 Digest"
 BTN_SOURCES = "📚 Sources"
 BTN_HELP = "❓ Help"
+BTN_CONTACT = "💬 Contact us"
 BTN_ADMIN = "🛠 Admin"
 KEYBOARD_PLACEHOLDER = "Choose from the menu…"
 

@@ -117,9 +117,16 @@ def main_keyboard(user: User) -> ReplyKeyboardMarkup:
             [KeyboardButton(L.BTN_PAUSE if user.notifications_enabled else L.BTN_RESUME),
              KeyboardButton(L.BTN_DIGEST)],
             [KeyboardButton(L.BTN_SOURCES), KeyboardButton(L.BTN_CVE)]]
-    last = [KeyboardButton(texts.LANGUAGE_BUTTON), KeyboardButton(L.BTN_HELP)]
+    help_row = [KeyboardButton(L.BTN_HELP)]
+    if config.SUPPORT_USERNAME:
+        help_row.append(KeyboardButton(L.BTN_CONTACT))
+    last = [KeyboardButton(texts.LANGUAGE_BUTTON)]
     if user.is_admin:
         last.append(KeyboardButton(L.BTN_ADMIN))
+    if len(help_row) == 1:  # no support contact: keep Help on the last row as before
+        last.insert(1, help_row.pop())
+    if help_row:
+        rows.append(help_row)
     rows.append(last)
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True,
                                input_field_placeholder=L.KEYBOARD_PLACEHOLDER)
@@ -1468,7 +1475,7 @@ def build_application(request=None) -> Application:
     for name, handler in [("BTN_TOPICS", interests), ("BTN_SETTINGS", settings), ("BTN_PAUSE", pause),
                           ("BTN_RESUME", resume), ("BTN_DIGEST", digest), ("BTN_SOURCES", sources),
                           ("BTN_HELP", help_command), ("BTN_ADMIN", admin), ("BTN_PULL", pull_news),
-                          ("BTN_CVE", cve)]:
+                          ("BTN_CVE", cve), ("BTN_CONTACT", support)]:
         app.add_handler(MessageHandler(private & filters.Text(texts.labels(name)), handler))
     app.add_handler(MessageHandler(private & filters.Text([texts.LANGUAGE_BUTTON]), choose_language))
 
