@@ -45,17 +45,32 @@ def welcome_back(name: str) -> str:
 
 
 TOPICS_PROMPT = ("🗞 <b>ርዕሶችዎን ይምረጡ</b>\n"
-                 "የፈለጉትን ያህል ይንኩ፣ ከዚያ <b>💾 አስቀምጥ</b>ን ይጫኑ። በማንኛውም ጊዜ መቀየር ይችላሉ።")
+                 "የፈለጉትን ያህል ይንኩ (እያንዳንዱ ንክኪ ወዲያውኑ ይቀመጣል)፣ ከዚያ <b>➡️ ቀጥል</b>ን ይጫኑ። "
+                 "በማንኛውም ጊዜ መቀየር ይችላሉ።")
+TOPICS_EDIT_PROMPT = ("🗞 <b>የእርስዎ ርዕሶች</b>\n"
+                      "ለመጨመር ወይም ለማስወገድ ርዕሱን ይንኩ። ለውጦች ወዲያውኑ ይቀመጣሉ።")
 
 
 def topics_selected(count: int) -> str:
     return f"\n\n<i>የተመረጡ፦ {count}</i>"
 
 
-TOPIC_SAVE = "💾 አስቀምጥ"
 TOPIC_SKIP = "አሁን እለፈው"
-TOPIC_CANCEL = "✖️ ሰርዝ"
 TOPIC_ALL = "☑️ ሁሉንም ምረጥ"
+NEXT = "➡️ ቀጥል"
+DONE = "✅ ጨርሻለሁ"
+TOPICS_ALL_ON = "☑️ ሁሉም ርዕሶች ተመርጠዋል"
+TOPICS_CLEARED = "⬜ ሁሉም ርዕሶች ተወግደዋል"
+
+
+def topic_added(topic: str) -> str:
+    return f"✅ {topic} ተጨምሯል"
+
+
+def topic_removed(topic: str) -> str:
+    return f"⬜ {topic} ተወግዷል"
+
+
 TOPIC_NONE = "⬜ አጽዳ"
 TOPIC_NEED_ONE = "ቢያንስ አንድ ርዕስ ይምረጡ፣ ወይም “አሁን እለፈው”ን ይንኩ።"
 
@@ -88,7 +103,6 @@ def interests_saved(topics: str) -> str:
 
 INTERESTS_EMPTY = ("⚠️ <b>ምንም ርዕስ አልተመረጠም።</b>\nርዕስ እስኪመርጡ ማሳወቂያ አይደርስዎትም "
                    "(🗞 የኔ ርዕሶች ወይም /interests)።")
-INTERESTS_UNCHANGED = "ምንም አልተቀየረም።"
 CATEGORY_GONE = "ይህ ርዕስ ከአሁን በኋላ የለም።"
 
 # ---------- pause / resume ----------
@@ -189,12 +203,11 @@ SOURCES_PROMPT = ("📚 <b>የዜና ምንጮችዎን ይምረጡ</b>\n"
                   "እነዚህ የመረጧቸውን ርዕሶች ይሸፍናሉ። ሁሉም በርተዋል፤ ለማጥፋት ይንኩ፣ ከዚያ <b>➡️ ቀጥል</b>ን ይጫኑ። "
                   "ወይም ሁሉንም ለማቆየት <b>⏭ እለፍ</b>ን ይንኩ።")
 SOURCES_MANAGE = ("📚 <b>የዜና ምንጮች</b>\n"
-                  "ምንጩን ለማብራት (✅) ወይም ለማጥፋት (⬜) ይንኩ፣ ከዚያ <b>💾 አስቀምጥ</b>ን ይጫኑ። አዳዲስ ምንጮች በርተው ይጀምራሉ።\n"
+                  "ምንጩን ለማብራት (✅) ወይም ለማጥፋት (⬜) ይንኩ፤ ለውጦች ወዲያውኑ ይቀመጣሉ። አዳዲስ ምንጮች በርተው ይጀምራሉ።\n"
                   "<i>ከእያንዳንዱ ምንጭ የራሱ መጋቢ ርዕስና አጭር መግለጫ እንልካለን፤ ሙሉውን ዜና በድረ-ገጻቸው ያንብቡ።</i>")
-SOURCES_NEXT = "➡️ ቀጥል"
 SOURCES_SKIP = "⏭ እለፍ (ሁሉም ምንጮች)"
 SOURCES_NEED_ONE = "ቢያንስ አንድ ምንጭ ይተዉ።"
-SOURCES_UNCHANGED = "ምንም አልተቀየረም።"
+SOURCES_ALL_ON = "☑️ ሁሉም ምንጮች በርተዋል"
 SOURCES_EMPTY = "አሁን የሚሠሩ ምንጮች የሉም።"
 SOURCE_GONE = "ይህ ምንጭ ከአሁን በኋላ የለም።"
 SET_SOURCES = "📚 ምንጮች"
@@ -206,6 +219,13 @@ def sources_on(on: int, total: int) -> str:
 
 def sources_saved(on: int, total: int) -> str:
     return f"✅ <b>ምንጮች ተቀምጠዋል።</b>\nዜና ከ{on} ምንጮች ይመጣል (ከ{total})።"
+
+def source_on(name: str) -> str:
+    return f"✅ {name} በርቷል"
+
+
+def source_off(name: str) -> str:
+    return f"⬜ {name} ጠፍቷል"
 
 
 # ---------- help ----------

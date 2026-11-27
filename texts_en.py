@@ -46,17 +46,32 @@ def welcome_back(name: str) -> str:
 
 
 TOPICS_PROMPT = ("🗞 <b>Choose your topics</b>\n"
-                 "Tap to select as many as you like, then <b>💾 Save</b>. You can change them any time.")
+                 "Tap as many as you like (each tap is saved right away), then <b>➡️ Next</b>. "
+                 "You can change them any time.")
+TOPICS_EDIT_PROMPT = ("🗞 <b>Your topics</b>\n"
+                      "Tap a topic to add or remove it. Changes are saved right away.")
 
 
 def topics_selected(count: int) -> str:
     return f"\n\n<i>Selected: {count}</i>"
 
 
-TOPIC_SAVE = "💾 Save"
 TOPIC_SKIP = "Skip for now"
-TOPIC_CANCEL = "✖️ Cancel"
 TOPIC_ALL = "☑️ Select all"
+NEXT = "➡️ Next"
+DONE = "✅ Done"
+TOPICS_ALL_ON = "☑️ All topics selected"
+TOPICS_CLEARED = "⬜ All topics cleared"
+
+
+def topic_added(topic: str) -> str:
+    return f"✅ {topic} added"
+
+
+def topic_removed(topic: str) -> str:
+    return f"⬜ {topic} removed"
+
+
 TOPIC_NONE = "⬜ Clear"
 TOPIC_NEED_ONE = "Choose at least one topic, or tap “Skip for now”."
 
@@ -89,7 +104,6 @@ def interests_saved(topics: str) -> str:
 
 INTERESTS_EMPTY = ("⚠️ <b>No topics selected.</b>\nYou won't get alerts until you choose some "
                    "(🗞 My topics or /interests).")
-INTERESTS_UNCHANGED = "No changes."
 CATEGORY_GONE = "That topic isn't available any more."
 
 # ---------- pause / resume ----------
@@ -189,13 +203,12 @@ SOURCES_PROMPT = ("📚 <b>Choose your news sources</b>\n"
                   "These cover the topics you picked. All are on: tap one to turn it off, then <b>➡️ Next</b>. "
                   "Or <b>⏭ Skip</b> to keep them all.")
 SOURCES_MANAGE = ("📚 <b>News sources</b>\n"
-                  "Tap a source to turn it on (✅) or off (⬜), then <b>💾 Save</b>. New sources start on.\n"
+                  "Tap a source to turn it on (✅) or off (⬜); changes are saved right away. New sources start on.\n"
                   "<i>We send headlines and short descriptions from each provider's own feed; read the full "
                   "story on their website.</i>")
-SOURCES_NEXT = "➡️ Next"
 SOURCES_SKIP = "⏭ Skip (all sources)"
 SOURCES_NEED_ONE = "Keep at least one source on."
-SOURCES_UNCHANGED = "No changes."
+SOURCES_ALL_ON = "☑️ All sources on"
 SOURCES_EMPTY = "No sources are active right now."
 SOURCE_GONE = "That source isn't available any more."
 SET_SOURCES = "📚 Sources"
@@ -207,6 +220,13 @@ def sources_on(on: int, total: int) -> str:
 
 def sources_saved(on: int, total: int) -> str:
     return f"✅ <b>Sources saved.</b>\nGetting news from {on} of {total} sources."
+
+def source_on(name: str) -> str:
+    return f"✅ {name} on"
+
+
+def source_off(name: str) -> str:
+    return f"⬜ {name} off"
 
 
 # ---------- help ----------

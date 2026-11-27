@@ -87,10 +87,11 @@ def test_new_user_onboarding(chat):
     api = chat.tap("tps:o")
     assert texts_en.TOPIC_NEED_ONE in api.last("answerCallbackQuery")["text"]
 
-    chat.tap(f"tp:o:{cid('cybersecurity')}")
+    api = chat.tap(f"tp:o:{cid('cybersecurity')}")
+    assert api.last("answerCallbackQuery")["text"] == "✅ 🔐 Cybersecurity added"  # a pop-up for each tap
+    assert set(db.interests(USER)) == {cid("cybersecurity")}  # saved straight away
     api = chat.tap(f"tp:o:{cid('sports')}")
-    buttons = [b["text"].rstrip("⠀") for row in api.last("editMessageText")["reply_markup"]["inline_keyboard"]
-               for b in row]
+    buttons = [b["text"] for row in api.last("editMessageText")["reply_markup"]["inline_keyboard"] for b in row]
     assert "✅ 🔐 Cybersecurity" in buttons and "✅ ⚽ Sports" in buttons and "⬜ 🏛 Politics" in buttons
     assert "Selected: 2" in api.last("editMessageText")["text"]
 
@@ -101,7 +102,7 @@ def test_new_user_onboarding(chat):
     assert any(t.startswith("✅ BBC Sport") for t in labels)          # covers Sports, on by default
     assert any(t.startswith("✅ The Hacker News") for t in labels)    # covers Cybersecurity
     assert not any("World Health" in t for t in labels)               # Health wasn't chosen
-    assert any(t.startswith(texts_en.SOURCES_NEXT) for t in labels)
+    assert texts_en.NEXT in labels
     assert any(t.startswith(texts_en.SOURCES_SKIP) for t in labels)
 
     api = chat.tap("srs:o")  # ➡️ Next with the defaults
@@ -148,17 +149,24 @@ def test_callback_data_is_validated(chat):
 def test_update_interests_without_onboarding_again(chat):
     onboard(chat)
     api = chat.send(texts_en.BTN_TOPICS)
-    assert "Choose your topics" in api.last("sendMessage")["text"] and "Welcome" not in api.last("sendMessage")["text"]
-    chat.tap(f"tp:i:{cid('cybersecurity')}")  # remove
-    chat.tap(f"tp:i:{cid('ethiopia')}")       # add
+    picker = api.last("sendMessage")
+    assert "Your topics" in picker["text"] and "Welcome" not in picker["text"]
+    assert [b["text"] for b in picker["reply_markup"]["inline_keyboard"][-1]] == [texts_en.DONE]
+    api = chat.tap(f"tp:i:{cid('cybersecurity')}")
+    assert api.last("answerCallbackQuery")["text"] == "⬜ 🔐 Cybersecurity removed"
+    api = chat.tap(f"tp:i:{cid('ethiopia')}")
+    assert api.last("answerCallbackQuery")["text"] == "✅ 🇪🇹 Ethiopia added"
+    assert "Selected: 2" in api.last("editMessageText")["text"]  # the count follows every tap
+    assert set(db.interests(USER)) == {cid("sports"), cid("ethiopia")}  # saved before Done
     api = chat.tap("tps:i")
     assert "Topics saved" in api.last("editMessageText")["text"]
-    assert set(db.interests(USER)) == {cid("sports"), cid("ethiopia")}
-    # Cancel leaves everything as it was.
-    chat.send("/interests")
-    chat.tap("tpn:i")
-    chat.tap("tpx:i")
-    assert set(db.interests(USER)) == {cid("sports"), cid("ethiopia")}
+    # Select all / Clear apply at once too.
+    assert chat.tap("tpa:i").last("answerCallbackQuery")["text"] == texts_en.TOPICS_ALL_ON
+    assert len(db.interests(USER)) == len(db.categories())
+    assert chat.tap("tpn:i").last("answerCallbackQuery")["text"] == texts_en.TOPICS_CLEARED
+    assert db.interests(USER) == {}
+    # An older message's ✖️ Cancel button works like Done.
+    assert "No topics selected" in chat.tap("tpx:i").last("editMessageText")["text"]
 
 
 def test_pause_and_resume(chat):
@@ -374,8 +382,8 @@ def test_menus_are_checkbox_grids(chat):
             rows = _rows(message)
             assert all(len(row) <= MAX_PER_ROW and fits(row) for row in rows), (language, name, rows)
             assert not any("⠀" in label for row in rows for label in row)  # no invisible padding
-        topic_rows = [row for row in _rows(screens["topics"]) if row[0][0] in "✅⬜"
-                      and not row[0].startswith(texts.get(language).TOPIC_NONE)]
+        topic_rows = [[b["text"] for b in row] for row in screens["topics"]["reply_markup"]["inline_keyboard"]
+                      if row[0]["callback_data"].startswith("tp:")]
         assert sum(len(row) for row in topic_rows) == len(db.categories())
         assert sum(1 for row in topic_rows if len(row) >= 2) >= 4  # mostly 2-3 per row
         assert any(len(row) == 3 for row in _rows(screens["digest"]))  # short labels: 3 per row
@@ -399,10 +407,11 @@ def test_sources_can_be_switched_off(chat):
     onboard(chat, topics=("sports", "cybersecurity"))
     chat.send("/sources")
     bbc_sport = min(p.id for p in db.providers() if p.name == "BBC Sport")
-    chat.tap(f"sr:s:{bbc_sport}")
-    api = chat.tap("srs:s")
+    api = chat.tap(f"sr:s:{bbc_sport}")
+    assert api.last("answerCallbackQuery")["text"] == "⬜ BBC Sport off"
+    assert bbc_sport in db.source_exclusions(USER)  # saved straight away
+    api = chat.tap("srs:s")  # ✅ Done
     assert "Sources saved" in api.last("editMessageText")["text"]
-    assert bbc_sport in db.source_exclusions(USER)
 
     # Alerts and 📥 Latest news both leave out BBC Sport now.
     _stories("bbc_sport", "s", SPORTS[:2])
@@ -410,13 +419,24 @@ def test_sources_can_be_switched_off(chat):
     shown = _alerts(chat.send(texts_en.BTN_PULL))
     assert len(shown) == 1 and "Ransomware" in shown[0]
 
-    # Turning everything off is refused; cancel leaves things as they were.
+    # The last source left on can't be turned off.
     chat.send("/sources")
-    api = chat.tap("srn:s")
-    api = chat.tap("srs:s")
-    assert texts_en.SOURCES_NEED_ONE in api.last("answerCallbackQuery")["text"]
-    chat.tap("srx:s")
-    assert db.source_exclusions(USER) == {bbc_sport}
+    groups = {}
+    for p in db.providers(enabled_only=True):
+        groups.setdefault(p.name, set()).add(p.id)
+    refused = None
+    for name, ids in sorted(groups.items()):
+        if ids <= db.source_exclusions(USER):
+            continue  # already off (BBC Sport)
+        api = chat.tap(f"sr:s:{min(ids)}")
+        if api.last("answerCallbackQuery").get("show_alert"):
+            refused = name
+            break
+    assert refused is not None and texts_en.SOURCES_NEED_ONE in api.last("answerCallbackQuery")["text"]
+    on = [n for n, ids in groups.items() if not ids <= db.source_exclusions(USER)]
+    assert on == [refused]
+    assert chat.tap("sra:s").last("answerCallbackQuery")["text"] == texts_en.SOURCES_ALL_ON
+    assert db.source_exclusions(USER) == set()
 
 
 def test_onboarding_source_choice_and_skip(chat):

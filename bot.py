@@ -193,9 +193,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
-    context.user_data["topics_draft"] = set(db.interests(user.telegram_id))
-    text, keyboard = _topic_picker(user, "o", context.user_data["topics_draft"],
-                                   update.effective_user.first_name)
+    text, keyboard = _topic_picker(user, "o", update.effective_user.first_name)
     await _send(context, update.effective_chat.id, text, keyboard)
 
 
@@ -227,17 +225,20 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 # ---------- topics (onboarding and /interests) ----------
-def _topic_picker(user: User, mode: str, draft: set[int], first_name: str | None = None
-                  ) -> tuple[str, InlineKeyboardMarkup]:
+# Every tap is saved straight away and answered with a short pop-up; ✅ Done / ➡️ Next just moves on.
+def _topic_picker(user: User, mode: str, first_name: str | None = None) -> tuple[str, InlineKeyboardMarkup]:
     L = tr(user)
     categories = db.categories()
-    text = (L.welcome(html.escape(first_name or "")) if mode == "o" else "") + L.TOPICS_PROMPT
-    text += L.topics_selected(len(draft & {c.id for c in categories}))
-    rows = _grid([(("✅ " if c.id in draft else "⬜ ") + c.label(user.language), f"{TOPIC}{mode}:{c.id}")
-                    for c in categories], checkboxes=True)
+    chosen = set(db.interests(user.telegram_id))
+    text = (L.welcome(html.escape(first_name or "")) + L.TOPICS_PROMPT) if mode == "o" else L.TOPICS_EDIT_PROMPT
+    text += L.topics_selected(len(chosen & {c.id for c in categories}))
+    rows = _grid([(("✅ " if c.id in chosen else "⬜ ") + c.label(user.language), f"{TOPIC}{mode}:{c.id}")
+                  for c in categories], checkboxes=True)
     rows.append([_button(L.TOPIC_ALL, f"{TOPIC_ALL}{mode}"), _button(L.TOPIC_NONE, f"{TOPIC_NONE}{mode}")])
-    rows.append([_button(L.TOPIC_SAVE, f"{TOPIC_SAVE}{mode}"),
-                 _button(L.TOPIC_SKIP if mode == "o" else L.TOPIC_CANCEL, f"{TOPIC_SKIP}{mode}")])
+    if mode == "o":
+        rows.append([_button(L.NEXT, f"{TOPIC_SAVE}o"), _button(L.TOPIC_SKIP, f"{TOPIC_SKIP}o")])
+    else:
+        rows.append([_button(L.DONE, f"{TOPIC_SAVE}i")])
     return text, InlineKeyboardMarkup(rows)
 
 
@@ -248,20 +249,11 @@ async def interests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if update.callback_query:
         await update.callback_query.answer()
-    context.user_data["topics_draft"] = set(db.interests(user.telegram_id))
-    text, keyboard = _topic_picker(user, "i", context.user_data["topics_draft"])
-    await _send(context, update.effective_chat.id, text, keyboard)
-
-
-def _draft(context: ContextTypes.DEFAULT_TYPE, user: User) -> set[int]:
-    """The selection being edited. After a restart it starts again from the saved topics."""
-    if "topics_draft" not in context.user_data:
-        context.user_data["topics_draft"] = set(db.interests(user.telegram_id))
-    return context.user_data["topics_draft"]
+    await _send(context, update.effective_chat.id, *_topic_picker(user, "i"))
 
 
 async def topic_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """tp:/tpa:/tpn: select or clear topics in the picker."""
+    """tp:/tpa:/tpn: add or remove topics, saved at once, with a pop-up saying what changed."""
     query = update.callback_query
     user = await _active_user(update, context)
     if not user:
@@ -269,55 +261,75 @@ async def topic_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     L = tr(user)
     prefix, rest = query.data.split(":", 1)
     mode = rest[0]
-    draft = _draft(context, user)
-    active = {c.id for c in db.categories()}
-    warning = None
+    active = {c.id: c for c in db.categories()}
+    chosen = set(db.interests(user.telegram_id))
+    alert = False
     if prefix == "tpa":
-        draft |= active
+        chosen, toast = set(active), L.TOPICS_ALL_ON
     elif prefix == "tpn":
-        draft.clear()
+        chosen, toast = set(), L.TOPICS_CLEARED
     else:
-        category_id = int(rest.split(":")[1])
-        if category_id not in active:
-            warning = L.CATEGORY_GONE
+        category = active.get(int(rest.split(":")[1]))
+        if not category:
+            toast, alert = L.CATEGORY_GONE, True
+        elif category.id in chosen:
+            chosen.discard(category.id)
+            toast = L.topic_removed(category.label(user.language))
         else:
-            draft.symmetric_difference_update({category_id})
-    draft &= active
-    await query.answer(warning, show_alert=bool(warning))
-    text, keyboard = _topic_picker(user, mode, draft, update.effective_user.first_name)
-    await _show(update, context, text, keyboard)
+            chosen.add(category.id)
+            toast = L.topic_added(category.label(user.language))
+    if not alert:
+        db.set_interests(user.telegram_id, chosen)
+    await query.answer(toast, show_alert=alert)
+    await _show(update, context, *_topic_picker(user, mode, update.effective_user.first_name))
 
 
 async def topic_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """tps:<mode>: save the selection. In onboarding, then ask how news should arrive."""
+    """tps:o ➡️ Next (onboarding: on to sources) or tps:i ✅ Done. Topics are already saved."""
     query = update.callback_query
     user = await _active_user(update, context)
     if not user:
         return
     L = tr(user)
     mode = query.data[len(TOPIC_SAVE):]
-    draft = _draft(context, user) & {c.id for c in db.categories()}
-    if mode == "o" and not draft:
+    chosen = db.interests(user.telegram_id)
+    if mode == "o" and not chosen:
         await query.answer(L.TOPIC_NEED_ONE, show_alert=True)
         return
     await query.answer()
-    db.set_interests(user.telegram_id, draft)
-    context.user_data.pop("topics_draft", None)
-    log.info("User %s saved %s topics", user.telegram_id, len(draft))
+    log.info("User %s has %s topics", user.telegram_id, len(chosen))
     if mode == "o":
         if _source_groups(user, "o"):
-            await _show_sources(update, context, user, "o", fresh=True)
+            await _show_sources(update, context, user, "o")
         else:
             await _show_delivery_step(update, context, user)
         return
     user = db.update_user(user.telegram_id, onboarding_completed=True)
-    await _show(update, context, L.interests_saved(_topic_names(user)) if draft else L.INTERESTS_EMPTY, None)
+    await _show(update, context, L.interests_saved(_topic_names(user)) if chosen else L.INTERESTS_EMPTY, None)
+
+
+async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """tpx:o skips the rest of onboarding (topics already ticked are kept). tpx:i comes from older
+    messages' ✖️ Cancel button and now works like ✅ Done."""
+    query = update.callback_query
+    if query.data == f"{TOPIC_SKIP}i":
+        await topic_save(update, context)
+        return
+    user = await _active_user(update, context)
+    if not user:
+        return
+    L = tr(user)
+    await query.answer()
+    user = db.update_user(user.telegram_id, onboarding_completed=True)
+    text = L.interests_saved(_topic_names(user)) if db.interests(user.telegram_id) else L.ONBOARDING_SKIPPED
+    await _show(update, context, text, None)
+    await _send(context, update.effective_chat.id, L.MENU_HINT, main_keyboard(user))
 
 
 async def _show_delivery_step(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User) -> None:
     L = tr(user)
     keyboard = InlineKeyboardMarkup(_grid([(L.DELIVERY_INSTANT, f"{ONBOARD_DELIVERY}instant"),
-                                             (L.DELIVERY_DIGEST, f"{ONBOARD_DELIVERY}digest")]))
+                                           (L.DELIVERY_DIGEST, f"{ONBOARD_DELIVERY}digest")]))
     await _show(update, context, L.DELIVERY_PROMPT, keyboard)
 
 
@@ -342,27 +354,27 @@ def _source_groups(user: User, mode: str) -> list[dict]:
     return sorted(result, key=lambda g: (not g["topics"], g["name"].casefold()))
 
 
-def _sources_off(context: ContextTypes.DEFAULT_TYPE, user: User, groups: list[dict], fresh: bool = False) -> set[int]:
-    """Group ids switched off in the selection being edited (starts from what's saved)."""
-    if fresh or "sources_off" not in context.user_data:
-        excluded = db.source_exclusions(user.telegram_id)
-        context.user_data["sources_off"] = {g["id"] for g in groups if g["ids"] <= excluded}
-    return context.user_data["sources_off"]
+def _groups_off(user: User, groups: list[dict]) -> set[int]:
+    """Ids of the groups the user switched off."""
+    excluded = db.source_exclusions(user.telegram_id)
+    return {g["id"] for g in groups if g["ids"] <= excluded}
 
 
 async def _show_sources(update: Update, context: ContextTypes.DEFAULT_TYPE, user: User, mode: str,
-                        fresh: bool = False, new_message: bool = False) -> None:
+                        new_message: bool = False) -> None:
     L = tr(user)
     groups = _source_groups(user, mode)
     if not groups:
         await _send(context, update.effective_chat.id, L.SOURCES_EMPTY, main_keyboard(user))
         return
-    off = _sources_off(context, user, groups, fresh)
+    off = _groups_off(user, groups)
     rows = _grid([(("⬜ " if g["id"] in off else "✅ ") + g["name"], f"{SOURCE}{mode}:{g['id']}")
-                   for g in groups], checkboxes=True)
-    rows.append([_button(L.TOPIC_ALL, f"{SOURCE_ALL}{mode}"), _button(L.TOPIC_NONE, f"{SOURCE_NONE}{mode}")])
-    rows.append([_button(L.SOURCES_NEXT if mode == "o" else L.TOPIC_SAVE, f"{SOURCE_SAVE}{mode}"),
-                 _button(L.SOURCES_SKIP if mode == "o" else L.TOPIC_CANCEL, f"{SOURCE_SKIP}{mode}")])
+                  for g in groups], checkboxes=True)
+    if mode == "o":
+        rows.append([_button(L.TOPIC_ALL, f"{SOURCE_ALL}o")])
+        rows.append([_button(L.NEXT, f"{SOURCE_SAVE}o"), _button(L.SOURCES_SKIP, f"{SOURCE_SKIP}o")])
+    else:
+        rows.append([_button(L.TOPIC_ALL, f"{SOURCE_ALL}s"), _button(L.DONE, f"{SOURCE_SAVE}s")])
     on = sum(1 for g in groups if g["id"] not in off)
     text = (L.SOURCES_PROMPT if mode == "o" else L.SOURCES_MANAGE) + L.sources_on(on, len(groups))
     if new_message:
@@ -375,11 +387,23 @@ async def sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """📚 Sources or /sources: choose which news sources to get stories from."""
     user = await _active_user(update, context)
     if user:
-        await _show_sources(update, context, user, "s", fresh=True, new_message=not update.callback_query)
+        await _show_sources(update, context, user, "s", new_message=not update.callback_query)
+
+
+def _set_groups(user: User, groups: list[dict], turn_off: set[int], turn_on: set[int]) -> None:
+    """Switch groups of sources off / on (all the feeds in each group), saved at once."""
+    by_id = {g["id"]: g for g in groups}
+    excluded = db.source_exclusions(user.telegram_id)
+    for gid in turn_off:
+        excluded |= by_id[gid]["ids"]
+    for gid in turn_on:
+        excluded -= by_id[gid]["ids"]
+    db.set_source_exclusions(user.telegram_id, excluded)
 
 
 async def source_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """sr:/sra:/srn: switch sources on or off in the picker."""
+    """sr: turn one source on or off; sra: all on. Saved at once, with a pop-up. The last source left
+    on can't be turned off."""
     query = update.callback_query
     user = await _active_user(update, context)
     if not user:
@@ -388,26 +412,34 @@ async def source_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     prefix, rest = query.data.split(":", 1)
     mode = rest[0]
     groups = _source_groups(user, mode)
-    off = _sources_off(context, user, groups)
-    ids = {g["id"] for g in groups}
-    warning = None
-    if prefix == "srn":
-        off |= ids
-    elif prefix == "sra":
-        off.clear()
+    off = _groups_off(user, groups)
+    by_id = {g["id"]: g for g in groups}
+    alert = False
+    if prefix == "sra":
+        _set_groups(user, groups, set(), set(by_id))
+        toast = L.SOURCES_ALL_ON
+    elif prefix == "srn":  # "clear" from older messages: everything off isn't allowed
+        toast, alert = L.SOURCES_NEED_ONE, True
     else:
-        group_id = int(rest.split(":")[1])
-        if group_id in ids:
-            off.symmetric_difference_update({group_id})
+        group = by_id.get(int(rest.split(":")[1]))
+        if not group:
+            toast, alert = L.SOURCE_GONE, True
+        elif group["id"] in off:
+            _set_groups(user, groups, set(), {group["id"]})
+            toast = L.source_on(group["name"])
+        elif len(off) + 1 >= len(groups):
+            toast, alert = L.SOURCES_NEED_ONE, True
         else:
-            warning = L.SOURCE_GONE
-    off &= ids
-    await query.answer(warning, show_alert=bool(warning))
-    await _show_sources(update, context, user, mode)
+            _set_groups(user, groups, {group["id"]}, set())
+            toast = L.source_off(group["name"])
+    await query.answer(toast, show_alert=alert)
+    if not alert:
+        await _show_sources(update, context, user, mode)
 
 
 async def source_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """srs: save (➡️ Next in onboarding); srx: skip with every source on (onboarding) or cancel."""
+    """srs:o ➡️ Next, srx:o ⏭ Skip (every source on), then the delivery step; srs:s ✅ Done
+    (srx:s, an older message's ✖️ Cancel, works like Done). Choices are already saved."""
     query = update.callback_query
     user = await _active_user(update, context)
     if not user:
@@ -415,45 +447,15 @@ async def source_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     L = tr(user)
     prefix, mode = query.data.split(":", 1)
     groups = _source_groups(user, mode)
-    off = _sources_off(context, user, groups) & {g["id"] for g in groups}
-    if prefix == "srx" and mode == "s":
-        await query.answer()
-        context.user_data.pop("sources_off", None)
-        await _show(update, context, L.SOURCES_UNCHANGED, None)
-        return
-    if prefix == "srx":
-        off = set()  # skip: every source on
-    if groups and len(off) == len(groups):
-        await query.answer(L.SOURCES_NEED_ONE, show_alert=True)
-        return
+    if prefix == "srx" and mode == "o":
+        _set_groups(user, groups, set(), {g["id"] for g in groups})
     await query.answer()
-    shown = set().union(*(g["ids"] for g in groups)) if groups else set()
-    switched_off = set().union(*(g["ids"] for g in groups if g["id"] in off)) if off else set()
-    # Sources not on this screen keep their saved state.
-    db.set_source_exclusions(user.telegram_id, (db.source_exclusions(user.telegram_id) - shown) | switched_off)
-    context.user_data.pop("sources_off", None)
-    log.info("User %s chose sources: %s of %s on", user.telegram_id, len(groups) - len(off), len(groups))
+    on = len(groups) - len(_groups_off(user, groups))
+    log.info("User %s has %s of %s sources on", user.telegram_id, on, len(groups))
     if mode == "o":
         await _show_delivery_step(update, context, user)
     else:
-        await _show(update, context, L.sources_saved(len(groups) - len(off), len(groups)), None)
-
-
-async def topic_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """tpx:<mode>: skip onboarding (no topics yet), or cancel editing topics."""
-    query = update.callback_query
-    user = await _active_user(update, context)
-    if not user:
-        return
-    L = tr(user)
-    await query.answer()
-    context.user_data.pop("topics_draft", None)
-    if query.data[len(TOPIC_SKIP):] == "i":
-        await _show(update, context, L.INTERESTS_UNCHANGED, None)
-        return
-    user = db.update_user(user.telegram_id, onboarding_completed=True)
-    await _show(update, context, L.ONBOARDING_SKIPPED, None)
-    await _send(context, update.effective_chat.id, L.MENU_HINT, main_keyboard(user))
+        await _show(update, context, L.sources_saved(on, len(groups)), None)
 
 
 async def onboarding_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -569,7 +571,7 @@ async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if action == "sources":
         await query.answer()
-        await _show_sources(update, context, user, "s", fresh=True)
+        await _show_sources(update, context, user, "s")
         return
     if action in ("pause", "resume"):
         user = _set_paused(user, action == "pause")
