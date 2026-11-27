@@ -42,6 +42,11 @@ class ProfileCache:
         self._locks: dict[int, asyncio.Lock] = {}
         self._limit = asyncio.Semaphore(CONCURRENCY)
 
+    def forget(self, telegram_id: int) -> None:
+        profile = self._profiles.pop(telegram_id, None)
+        if profile and profile.photo_unique_id:
+            self._photos.pop(profile.photo_unique_id, None)
+
     def cached(self, telegram_id: int) -> Profile | None:
         return self._profiles.get(telegram_id)
 

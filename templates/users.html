@@ -73,6 +73,7 @@
             {% endmacro %}
             {% if u.role == "admin" %}{{ act("remove_admin", "Remove admin") }}{% else %}{{ act("make_admin", "Make admin") }}{% endif %}
             {% if u.status == "disabled" %}{{ act("enable", "Enable", "ok") }}{% else %}{{ act("disable", "Disable", "danger", "Stop all alerts to this user?") }}{% endif %}
+            {{ act("delete", "Delete", "danger", "Delete " ~ ((u.first_name or "this user") | replace("'", "") | replace("\\", "")) ~ " and all their data (topics, sources, CVE settings, alert history)? This cannot be undone. They can join again with /start.") }}
           </div>
           {% endif %}
         </td>

@@ -409,6 +409,11 @@ class Database:
             (day_start_utc(local_today()), search, like, like, like)).fetchall()
         return [{"user": _row(User, r), "topics": r["topics"], "sent_today": r["sent_today"]} for r in rows]
 
+    def delete_user(self, telegram_id: int) -> bool:
+        """Remove a user and everything about them (topics, sources, CVE technologies, alert history:
+        all ON DELETE CASCADE). They can start again with /start as a new user."""
+        return self.execute("DELETE FROM users WHERE telegram_id = %s", (telegram_id,)).rowcount > 0
+
     def user_preferences(self, user_ids: list[int]) -> dict[int, dict]:
         """For the admin page: each user's topics (with mute state), switched-off sources and CVE
         technologies, in three queries for the whole list."""

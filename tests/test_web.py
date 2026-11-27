@@ -95,6 +95,23 @@ def test_user_management(client):
     assert "be changed here" in r.text and db.get_user(999).status == "active"
 
 
+def test_admin_can_delete_a_user(client):
+    csrf = login(client)
+    db.upsert_user(100, 100, "abebe", "Abe'be")
+    db.set_interests(100, {db.category_by_key("sports").id})
+    db.add_user_technology(100, "nginx")
+    html = client.get("/users").text
+    assert 'action="/users/100/delete"' in html and "Delete Abebe and all their data" in html  # quote stripped
+    r = client.post("/users/100/delete", data={"csrf": csrf}, follow_redirects=True)
+    assert "was deleted" in r.text and db.get_user(100) is None
+    assert db.interests(100) == {} and db.user_technologies(100) == []
+    assert client.post("/users/100/delete", data={"csrf": csrf}).status_code == 404
+    db.upsert_user(999, 999, None, "Super")  # super admins can't be deleted
+    r = client.post("/users/999/delete", data={"csrf": csrf}, follow_redirects=True)
+    assert "be changed here" in r.text and db.get_user(999) is not None
+    assert client.post("/users/999/delete", data={"csrf": "wrong"}).status_code == 400
+
+
 def test_users_page_lists_preferences(client):
     login(client)
     db.upsert_user(100, 100, "abebe", "Abebe")

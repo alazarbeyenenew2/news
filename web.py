@@ -320,6 +320,10 @@ def create_web_app(lifespan=None) -> FastAPI:
             raise HTTPException(404, "User not found")
         if user.is_super_admin:
             return _back("/users", "Super admins (SUPER_ADMIN_IDS) can't be changed here.", q=q)
+        if action == "delete":
+            db.delete_user(telegram_id)
+            request.app.state.profiles.forget(telegram_id)
+            return _back("/users", f"{user.display_name} was deleted with all their data.", q=q)
         changes = {"disable": {"status": "disabled", "notifications_enabled": False},
                    "enable": {"status": "active"},
                    "make_admin": {"role": "admin"}, "remove_admin": {"role": "user"}}
